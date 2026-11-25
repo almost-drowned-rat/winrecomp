@@ -123,6 +123,7 @@ typedef struct wr_vk {
     VkRenderPass target_load;     /* offscreen colour + depth, colour kept */
     int vsync;
     int need_recreate;
+    int swap_readable;           /* swapchain images allow TRANSFER_SRC (debug dumps) */
 
     wr_vk_frame frames[WR_VK_FRAMES];
     uint32_t frame;              /* index into frames */
@@ -194,6 +195,8 @@ void wr_vk_fit_rect(uint32_t sw, uint32_t sh, uint32_t aw, uint32_t ah, int *x, 
  * call between wr_vk_target_end and wr_vk_frame_end; the file is written by
  * wr_vk_frame_end after the frame completed). */
 void wr_vk_dump_target(wr_vk_target *t, const char *png_path);
+/* The same for the swapchain image (after the present pass). */
+void wr_vk_dump_swap(const char *png_path);
 
 /* Pipelines */
 VkShaderModule wr_vk_shader(const uint32_t *spirv, size_t bytes);

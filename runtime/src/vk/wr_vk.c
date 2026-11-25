@@ -25,6 +25,7 @@ static wr_vk_buffer g_dump_buf;
 static char g_dump_path[1024];
 static uint32_t g_dump_w, g_dump_h;
 static int g_dump_pending;
+static int g_dump_bgra;
 static void write_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h);
 static SDL_Window *g_win;
 
@@ -155,6 +156,9 @@ static int create_swapchain(void)
     ci.imageExtent = ext;
     ci.imageArrayLayers = 1;
     ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+        ci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;   /* debug dumps of the shown picture */
+    g_vk.swap_readable = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
     ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
                           ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : caps.currentTransform;
@@ -822,6 +826,14 @@ void wr_vk_frame_end(void)
     g_vk.in_frame = 0;
     if (g_dump_pending) {
         vkDeviceWaitIdle(g_vk.dev);
+        if (g_dump_bgra) {
+            uint8_t *p = (uint8_t *)g_dump_buf.map;
+            for (size_t i = 0; i < (size_t)g_dump_w * g_dump_h; i++) {
+                uint8_t tmp = p[4 * i];
+                p[4 * i] = p[4 * i + 2];
+                p[4 * i + 2] = tmp;
+            }
+        }
         write_png(g_dump_path, (const uint8_t *)g_dump_buf.map, g_dump_w, g_dump_h);
         wr_log("vulkan: frame written to %s", g_dump_path);
         g_dump_pending = 0;
@@ -912,9 +924,25 @@ static void write_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_
     free(z);
 }
 
+static void dump_image(VkImage img, uint32_t w, uint32_t h, VkImageLayout layout, int bgra, const char *path);
+
 void wr_vk_dump_target(wr_vk_target *t, const char *path)
 {
-    if (!t || !g_vk.in_frame || g_vk.in_pass)
+    if (t)
+        dump_image(t->color, t->w, t->h, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, path);
+}
+
+void wr_vk_dump_swap(const char *path)
+{
+    if (g_vk.swap_readable)
+        dump_image(g_vk.images[g_vk.image], g_vk.extent.width, g_vk.extent.height, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                   g_vk.format == VK_FORMAT_B8G8R8A8_UNORM, path);
+}
+
+static void dump_image(VkImage img, uint32_t w, uint32_t h, VkImageLayout layout, int bgra, const char *path)
+{
+    struct { VkImage color; uint32_t w, h; } tt = { img, w, h }, *t = &tt;
+    if (!g_vk.in_frame || g_vk.in_pass)
         return;
     VkDeviceSize need = (VkDeviceSize)t->w * t->h * 4;
     if (g_dump_buf.size < need) {
@@ -924,19 +952,20 @@ void wr_vk_dump_target(wr_vk_target *t, const char *path)
             return;
     }
     VkCommandBuffer cmd = g_vk.frames[g_vk.frame].cmd;
-    barrier(cmd, t->color, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    barrier(cmd, t->color, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
     VkBufferImageCopy c = { 0 };
     c.imageSubresource = (VkImageSubresourceLayers){ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     c.imageExtent = (VkExtent3D){ t->w, t->h, 1 };
     vkCmdCopyImageToBuffer(cmd, t->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_dump_buf.buf, 1, &c);
-    barrier(cmd, t->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    barrier(cmd, t->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, layout,
             VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
     snprintf(g_dump_path, sizeof g_dump_path, "%s", path);
     g_dump_w = t->w;
     g_dump_h = t->h;
+    g_dump_bgra = bgra;
     g_dump_pending = 1;
 }
 

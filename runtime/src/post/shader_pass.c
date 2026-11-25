@@ -18,8 +18,12 @@
  * - A broken preset or a failed frame is logged and leaves the picture
  *   unshaded; nothing here can stop the game.
  * - No preset: sp_tick returns 0 at once -- no pass, no cost. */
+/* winrecomp: Vulkan through the backend's loaded function pointers (no
+ * prototypes, no link against a loader); must come before shader_pass.h */
+#include "vk/wr_vk.h"
 #include "shader_pass.h"
 #include "wr_post.h"
+#include <SDL3/SDL_vulkan.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -320,7 +324,7 @@ static int SDLCALL build_thread(void *arg)
     dv.instance = b->d.inst;
     dv.device = b->d.dev;
     dv.queue = b->d.queue;
-    dv.entry = vkGetInstanceProcAddr;
+    dv.entry = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
     if (lib_err(L.create(&preset, dv, b->cb, &co, &b->chain), "building the shader chain"))
         b->chain = NULL;
     preset = NULL;                                /* taken by the create, even when it failed */
