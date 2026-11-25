@@ -96,7 +96,7 @@ uint32_t wr_module_proc(wr_module *m, const char *name)
             static char labels[WR_THUNK_MAX][80];
             static int nl;
             const char *label = e->name;
-            if (nl < WR_THUNK_MAX) {
+            if (nl < (int)WR_THUNK_MAX) {
                 snprintf(labels[nl], sizeof labels[nl], "%s!%s", m->name, e->name);
                 label = labels[nl++];
             }

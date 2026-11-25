@@ -16,6 +16,7 @@ add_library(winrecomp_rt STATIC
     src/win32/dinput8.c
     src/win32/misc.c
     src/libs/miles_bink_silent.c
+    src/vk/wr_vk.c
 )
 target_include_directories(winrecomp_rt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -24,6 +25,6 @@ target_include_directories(winrecomp_rt PUBLIC
 target_link_libraries(winrecomp_rt PUBLIC SDL3::SDL3 m)
 set_target_properties(winrecomp_rt PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 if(NOT MSVC)
-    target_compile_options(winrecomp_rt PRIVATE -Wall -Wextra -Wno-unused-parameter -fwrapv -fno-strict-aliasing)
+    target_compile_options(winrecomp_rt PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fwrapv -fno-strict-aliasing)
     target_compile_definitions(winrecomp_rt PRIVATE _GNU_SOURCE)
 endif()
