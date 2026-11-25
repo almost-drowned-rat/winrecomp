@@ -809,7 +809,8 @@ class FunctionDetector:
             # address and passed around as values, so an immediate is exactly
             # how they show up.
             if not (self.engine.probes_as_returning_body(target)
-                    or self.engine.probes_as_vcall_thunk(target)):
+                    or self.engine.probes_as_vcall_thunk(target)
+                    or self._padded_prologue(target)):
                 continue
             if target not in self.engine.instructions:
                 if not self.engine.decode_at(target):
@@ -821,6 +822,23 @@ class FunctionDetector:
         if found:
             print(f"  {found} function address(es) taken as an immediate")
         return found > 0
+
+    def _padded_prologue(self, target: int) -> bool:
+        """winrecomp: a prologue right after alignment padding (nop / int3).
+
+        probes_as_returning_body follows one linear path to a ret, so a
+        function whose entry block ends in a switch (`jmp [eax*4 + table]`)
+        fails it. GTA 2's window procedure 0x004D0A00 is exactly that, and it
+        is only ever named by the immediate stored into its WNDCLASS: it was
+        never translated, and every message went nowhere. A prologue the
+        linker aligned with padding is strong enough evidence on its own,
+        provided the bytes still decode as a body.
+        """
+        prev = self.image.read_bytes_at_va(target - 1, 1)
+        if not prev or prev[0] not in (0x90, 0xCC):
+            return False
+        return (self.engine.probes_as_prologue(target)
+                and self.engine.probes_as_function_body(target))
 
     def _pass_tail_jump_targets(self, sections: List[SectionInfo]) -> bool:
         """

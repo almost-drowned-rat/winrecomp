@@ -2647,7 +2647,7 @@ class FunctionTranslator:
             used_regs.add("ebp")
 
         # PUSHAD/POPAD implicitly read or restore every register.
-        if any(i.mnemonic in ("pushal", "pushad", "popal", "popad")
+        if any(i.mnemonic in ("pushal", "pushad", "popal", "popad", "pushaw", "popaw")
                for i in instructions):
             used_regs.update(("ebx", "esi", "edi", "ebp"))
 
