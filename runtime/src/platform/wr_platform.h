@@ -15,6 +15,10 @@ int  wr_key_from_sdl(int sdl_scancode, uint8_t *vk, uint8_t *dik);
 void wr_keys_dik_state(uint8_t out[256]);
 int  wr_key_vk_down(uint8_t vk);
 
+/* Scripted test input (WR_INPUT). */
+void wr_input_script_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up));
+void wr_input_script_dik(uint8_t st[256]);
+
 /* Host windowing. wr_platform_init starts SDL video/events/gamepads once;
  * headless runs (WR_HEADLESS=1) create no window. */
 int  wr_platform_init(void);

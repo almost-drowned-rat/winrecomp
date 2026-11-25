@@ -12,6 +12,7 @@ add_library(winrecomp_rt STATIC
     src/wr_pe.c
     src/wr_paths.c
     src/platform/wr_keys.c
+    src/platform/wr_input_script.c
     src/win32/kernel32.c
     src/win32/user32.c
     src/win32/dinput8.c

@@ -214,11 +214,28 @@ static uint32_t key_lparam(uint8_t dik, int up, int repeat)
 
 extern volatile uint32_t wr_heartbeat;
 
+static void script_key(uint8_t vk, uint8_t dik, int up)
+{
+    wwin *mw = main_win();
+    if (!mw)
+        return;
+    uint32_t chr = 0;
+    if (!up) {
+        if (vk == 0x0D) chr = '\r';
+        else if (vk == 0x1B) chr = 27;
+        else if (vk == 0x08) chr = 8;
+        else if ((vk >= '0' && vk <= '9') || vk == ' ') chr = vk;
+        else if (vk >= 'A' && vk <= 'Z') chr = vk + 32;
+    }
+    post(mw->hwnd, up ? WM_KEYUP : WM_KEYDOWN, vk, key_lparam(dik, up, 0), chr);
+}
+
 void w32_pump_events(X86Ctx *ctx)
 {
     (void)ctx;
     wr_heartbeat++;
     run_timers();
+    wr_input_script_tick(script_key);
     if (g_headless || !g_sdl_up)
         return;
     wwin *mw = main_win();

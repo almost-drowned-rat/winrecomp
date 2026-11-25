@@ -433,12 +433,58 @@ static int is_system_dll(const char *path)
 
 #define VER_BLOCK 0x80
 
+/* The game's own exe: its RT_VERSION resource from the mapped image. */
+static int is_game_exe(const char *path)
+{
+    const char *s = strrchr(path, '\\');
+    s = s ? s + 1 : path;
+    return !strcasecmp(s, g_wr_exe_name);
+}
+
+static uint32_t res_find(uint32_t rsrc, uint32_t dir, uint32_t id, int any)
+{
+    uint16_t named = wr_rd16(dir + 12), ids = wr_rd16(dir + 14);
+    for (uint32_t i = 0; i < (uint32_t)named + ids; i++) {
+        uint32_t e = dir + 16 + 8 * i;
+        uint32_t name = wr_rd32(e), off = wr_rd32(e + 4);
+        if (any || (!(name & 0x80000000u) && name == id))
+            return off;
+    }
+    (void)rsrc;
+    return 0xFFFFFFFFu;
+}
+
+/* VS_VERSIONINFO of the image: guest address + size, 0 if none. */
+static uint32_t image_version(uint32_t *size)
+{
+    uint32_t b = g_wr_image.base;
+    uint32_t pe = b + wr_rd32(b + 0x3C);
+    uint32_t rva = wr_rd32(pe + 24 + 96 + 2 * 8);
+    if (!rva)
+        return 0;
+    uint32_t root = b + rva;
+    uint32_t o = res_find(root, root, 16, 0);                  /* RT_VERSION */
+    if (o == 0xFFFFFFFFu || !(o & 0x80000000u)) return 0;
+    o = res_find(root, root + (o & 0x7FFFFFFFu), 0, 1);       /* first name */
+    if (o == 0xFFFFFFFFu || !(o & 0x80000000u)) return 0;
+    o = res_find(root, root + (o & 0x7FFFFFFFu), 0, 1);       /* first language */
+    if (o == 0xFFFFFFFFu || (o & 0x80000000u)) return 0;
+    uint32_t data = root + o;
+    *size = wr_rd32(data + 4);
+    return b + wr_rd32(data);
+}
+
 WR_HANDLER(v_GetFileVersionInfoSizeA)
 {
     (void)base;
     const char *p = wr_str(WR_ARG(0));
     if (WR_ARG(1))
         wr_wr32(WR_ARG(1), 0);
+    uint32_t vsize = 0;
+    if (p && is_game_exe(p) && image_version(&vsize)) {
+        wr_log("GetFileVersionInfoSizeA(%s) -> the image's version resource", p);
+        WR_RET(vsize + 16, 2);
+    }
     int ok = p && is_system_dll(p);
     wr_log("GetFileVersionInfoSizeA(%s) -> %s", p ? p : "", ok ? "DirectX 8.1 file" : "no version info");
     if (!ok)
@@ -451,6 +497,13 @@ WR_HANDLER(v_GetFileVersionInfoA)
     (void)base;
     const char *p = wr_str(WR_ARG(0));
     uint32_t len = WR_ARG(2), out = WR_ARG(3);
+    uint32_t vsize = 0, vva;
+    if (p && is_game_exe(p) && (vva = image_version(&vsize)) != 0) {
+        if (len < vsize)
+            WR_RET(0, 4);
+        memcpy(wr_ptr(out), wr_ptr(vva), vsize);
+        WR_RET(1, 4);
+    }
     if (!p || !is_system_dll(p) || len < VER_BLOCK)
         WR_RET(0, 4);
     memset(wr_ptr(out), 0, VER_BLOCK);
@@ -473,8 +526,20 @@ WR_HANDLER(v_VerQueryValueA)
     (void)base;
     uint32_t blk = WR_ARG(0), out = WR_ARG(2), plen = WR_ARG(3);
     const char *sub = wr_str(WR_ARG(1));
+    if (sub && !strcmp(sub, "\\") && wr_rd32(blk) != 0x52575652u) {
+        /* a real VS_VERSIONINFO: the fixed info follows "VS_VERSION_INFO" */
+        uint16_t total = wr_rd16(blk);
+        for (uint32_t o = 0; o + 52 <= total; o += 4)
+            if (wr_rd32(blk + o) == 0xFEEF04BDu) {
+                wr_wr32(out, blk + o);
+                if (plen)
+                    wr_wr32(plen, 52);
+                WR_RET(1, 4);
+            }
+        WR_RET(0, 4);
+    }
     if (wr_rd32(blk) != 0x52575652u || !sub || strcmp(sub, "\\")) {
-        WR_TRACE("VerQueryValueA(%s) -> not available", sub ? sub : "");
+        wr_log("VerQueryValueA(%s) -> not available", sub ? sub : "");
         WR_RET(0, 4);
     }
     wr_wr32(out, blk + 0x10);

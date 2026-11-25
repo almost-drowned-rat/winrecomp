@@ -73,9 +73,12 @@ int wr_key_from_sdl(int sdl_scancode, uint8_t *vk, uint8_t *dik)
 void wr_keys_dik_state(uint8_t out[256])
 {
     int n = 0;
-    const bool *st = SDL_GetKeyboardState(&n);
     for (int i = 0; i < 256; i++)
         out[i] = 0;
+    wr_input_script_dik(out);
+    const bool *st = SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(&n) : NULL;
+    if (!st)
+        return;
     for (size_t i = 0; i < sizeof k_keys / sizeof k_keys[0]; i++)
         if (k_keys[i].sdl < n && st[k_keys[i].sdl])
             out[k_keys[i].dik] = 0x80;

@@ -87,9 +87,8 @@ static int g_kb_n, g_kb_bufsize = 0;
 
 static void kb_poll(void)
 {
-    if (wr_platform_headless())
-        return;
-    SDL_PumpEvents();
+    if (!wr_platform_headless())
+        SDL_PumpEvents();
     uint8_t cur[256];
     wr_keys_dik_state(cur);
     if (g_kb_bufsize) {
