@@ -152,15 +152,24 @@ static void split(uint32_t b, uint32_t size)
     uint32_t rest = b + size;
     uint32_t rsize = total - size;
     set_hdr(b, size, bflags(b));
+    uint32_t n = rest + rsize < g_top ? rest + rsize : 0;   /* rest has no header yet */
+    /* The remainder may border a free block (realloc shrinking a block whose
+     * successor is free) or the wilderness: merge, never leave two free
+     * blocks side by side. */
+    if (n && !(bflags(n) & F_INUSE)) {
+        bin_remove(n);
+        rsize += bsize(n);
+        n = next_block(n);
+    }
+    if (!n) {
+        g_top = rest;
+        g_last_block = b;
+        return;
+    }
     set_hdr(rest, rsize, F_PREV_INUSE);   /* b is in use */
     wr_wr32(rest + 4, size);
-    uint32_t n = next_block(rest);
-    if (n) {
-        wr_wr32(n + 4, rsize);
-        set_hdr(n, bsize(n), bflags(n) & ~F_PREV_INUSE);
-    } else {
-        g_last_block = rest;
-    }
+    wr_wr32(n + 4, rsize);
+    set_hdr(n, bsize(n), bflags(n) & ~F_PREV_INUSE);
     bin_insert(rest);
 }
 
