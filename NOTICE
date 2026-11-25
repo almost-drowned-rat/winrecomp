@@ -1,0 +1,9 @@
+winrecomp — attribution
+=======================
+
+winrecomp is a static recompilation toolkit for 32-bit Windows (PE) games.
+
+The x86 -> C pipeline under tools/ (disasm, func_id, abi_analysis, recomp,
+gameconfig.py) is taken from xboxrecomp (branch option-c), MIT licensed,
+Copyright (c) 2026 sp00nz; see LICENSE. winrecomp adds a Win32 PE front end
+(tools/disasm/loader.py: load_pe_image, tools/xbe_parser shim).
