@@ -217,6 +217,8 @@ int  wr_path_ci(const char *dir, const char *rel, char *host, size_t cap);
 /* ---- logging ------------------------------------------------------------------ */
 
 void wr_log_init(void);
+/* Fatal signal / exception report into the log. */
+void wr_crash_init(void);
 void wr_log(const char *fmt, ...);
 void wr_logv(const char *fmt, va_list ap);
 void wr_fatal(const char *fmt, ...);

@@ -6,6 +6,7 @@ find_package(SDL3 REQUIRED CONFIG)
 
 add_library(winrecomp_rt STATIC
     src/wr_core.c
+    src/wr_crash.c
     src/wr_mem.c
     src/wr_heap.c
     src/wr_pe.c
