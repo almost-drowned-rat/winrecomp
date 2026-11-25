@@ -158,12 +158,31 @@ static const wr_export mss_exports[] = {
 
 /* ---- Bink ------------------------------------------------------------------------------ */
 
+/* A movie of one frame that is over at once: frame counters (+0x08..+0x14
+ * in the BINK header) all 1, so the game's "frame == frames" test ends the
+ * playback through its normal path (it treats a failed BinkOpen as fatal). */
 WR_HANDLER(bink_Open)
 {
     (void)base;
     const char *name = wr_str(WR_ARG(0));
-    wr_log("BinkOpen(%s): movies are skipped until M5", name ? name : "");
-    WR_RET(0, 2);
+    wr_log("BinkOpen(%s): skipped (one empty frame) until M5", name ? name : "");
+    uint32_t b = wr_galloc(0x200);
+    wr_wr32(b + 0x00, 640);
+    wr_wr32(b + 0x04, 480);
+    for (uint32_t o = 0x08; o <= 0x14; o += 4)
+        wr_wr32(b + o, 1);
+    wr_wr32(b + 0x18, 30);    /* frame rate */
+    wr_wr32(b + 0x1C, 1);
+    WR_RET(b, 2);
+}
+
+WR_HANDLER(bink_BufferOpen)
+{
+    (void)base;
+    uint32_t b = wr_galloc(0x200);
+    wr_wr32(b + 0x00, 640);
+    wr_wr32(b + 0x04, 480);
+    WR_RET(b, 4);
 }
 
 STUB(bink_OpenMiles, 1, 0)
@@ -176,12 +195,11 @@ STUB(bink_CopyToBuffer, 7, 0)
 STUB(bink_BufferLock, 1, 0)
 STUB(bink_BufferBlit, 3, 0)
 STUB(bink_BufferUnlock, 1, 0)
-STUB(bink_BufferOpen, 4, 0)
 STUB(bink_NextFrame, 1, 0)
-STUB(bink_Close, 1, 0)
+STUB(bink_Close, 1, (wr_heap_free(WR_ARG(0)), 0))
 STUB(bink_BufferSetOffset, 3, 0)
 STUB(bink_BufferCheckWinPos, 3, 0)
-STUB(bink_BufferClose, 1, 0)
+STUB(bink_BufferClose, 1, (wr_heap_free(WR_ARG(0)), 0))
 STUB(bink_GetSummary, 2, 0)
 
 static const wr_export bink_exports[] = {

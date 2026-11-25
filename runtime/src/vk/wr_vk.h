@@ -51,7 +51,7 @@ extern "C" {
     X(vkBeginCommandBuffer) X(vkEndCommandBuffer) X(vkCmdBeginRenderPass) X(vkCmdEndRenderPass) \
     X(vkCmdBindPipeline) X(vkCmdBindVertexBuffers) X(vkCmdBindDescriptorSets) X(vkCmdDraw) \
     X(vkCmdSetViewport) X(vkCmdSetScissor) X(vkCmdPushConstants) X(vkCmdPipelineBarrier) \
-    X(vkCmdCopyBufferToImage) X(vkCmdClearAttachments) \
+    X(vkCmdCopyBufferToImage) X(vkCmdCopyImageToBuffer) X(vkCmdClearAttachments) \
     X(vkCreateFence) X(vkDestroyFence) X(vkWaitForFences) X(vkResetFences) \
     X(vkCreateSemaphore) X(vkDestroySemaphore) \
     X(vkCreateShaderModule) X(vkDestroyShaderModule) X(vkCreatePipelineLayout) \
@@ -80,6 +80,8 @@ typedef struct wr_vk_texture {
     VkDeviceMemory mem;
     uint32_t w, h;
     VkDescriptorSet set;        /* permanent set (texture + the given sampler) */
+    VkDescriptorSet alt_set;    /* the same image with a second sampler (lazy) */
+    VkSampler alt_sampler;
 } wr_vk_texture;
 
 typedef struct wr_vk_frame {
@@ -179,12 +181,19 @@ wr_vk_texture *wr_vk_texture_create(uint32_t w, uint32_t h, const uint32_t *rgba
 void wr_vk_texture_update(wr_vk_texture *t, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                           const uint32_t *rgba, uint32_t src_pitch_px);
 void wr_vk_texture_destroy(wr_vk_texture *t);
+/* The texture's set with another sampler (created once per texture). */
+VkDescriptorSet wr_vk_texture_alt_set(wr_vk_texture *t, VkSampler sampler);
 
 /* Present pass: draw a target into (x, y, w, h) of the swapchain image with
  * the given gamma (1.0 = none). */
 void wr_vk_blit(VkCommandBuffer cmd, wr_vk_target *t, int x, int y, int w, int h, float gamma);
 /* Largest aw:ah rectangle centred in sw x sh (pillar/letterbox). */
 void wr_vk_fit_rect(uint32_t sw, uint32_t sh, uint32_t aw, uint32_t ah, int *x, int *y, int *w, int *h);
+
+/* Debug: write the target as PNG after the current frame (records a copy;
+ * call between wr_vk_target_end and wr_vk_frame_end; the file is written by
+ * wr_vk_frame_end after the frame completed). */
+void wr_vk_dump_target(wr_vk_target *t, const char *png_path);
 
 /* Pipelines */
 VkShaderModule wr_vk_shader(const uint32_t *spirv, size_t bytes);

@@ -27,7 +27,9 @@ void wr_icall_trace_dump(void);
 static void report(const char *what, uintptr_t fault)
 {
     uintptr_t gbase = (uintptr_t)g_xbox_mem_offset;
-    if (gbase && fault >= gbase && fault < gbase + (uintptr_t)WR_GUEST_SPAN)
+    if (!fault)
+        ;
+    else if (gbase && fault >= gbase && fault < gbase + (uintptr_t)WR_GUEST_SPAN)
         wr_log("CRASH: %s at host %p = guest address 0x%08X", what, (void *)fault, (uint32_t)(fault - gbase));
     else
         wr_log("CRASH: %s at host %p", what, (void *)fault);
@@ -55,6 +57,48 @@ static void report(const char *what, uintptr_t fault)
     }
 #endif
 }
+
+/* ---- hang watchdog ------------------------------------------------------------------------
+ * The guest's message loop / frame flip bumps wr_heartbeat. A host thread
+ * checks it; when it stops for WR_WATCHDOG seconds (default 5, 0 = off) the
+ * main thread gets SIGUSR1 and logs where it is: the backtrace names the
+ * generated sub_XXXXXXXX it is stuck in. */
+volatile uint32_t wr_heartbeat;
+
+#if !defined(_WIN32)
+#include <pthread.h>
+#include <unistd.h>
+static pthread_t g_main_thread;
+
+static void on_usr1(int sig)
+{
+    (void)sig;
+    wr_log("WATCHDOG: no message loop / flip for a while - the main thread is here:");
+    report("hang", 0);
+}
+
+static void *watchdog(void *arg)
+{
+    int secs = (int)(intptr_t)arg;
+    uint32_t last = wr_heartbeat;
+    int still = 0, reported = 0;
+    for (;;) {
+        sleep(1);
+        uint32_t now = wr_heartbeat;
+        if (now != last) {
+            last = now;
+            still = 0;
+            reported = 0;
+            continue;
+        }
+        if (++still >= secs && !reported) {
+            pthread_kill(g_main_thread, SIGUSR1);
+            reported = 1;
+        }
+    }
+    return NULL;
+}
+#endif
 
 #if defined(_WIN32)
 static LONG WINAPI on_exception(EXCEPTION_POINTERS *ep)
@@ -92,5 +136,14 @@ void wr_crash_init(void)
     int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT };
     for (size_t i = 0; i < sizeof sigs / sizeof sigs[0]; i++)
         sigaction(sigs[i], &sa, NULL);
+    const char *w = getenv("WR_WATCHDOG");
+    int secs = w && *w ? atoi(w) : 5;
+    if (secs > 0) {
+        g_main_thread = pthread_self();
+        signal(SIGUSR1, on_usr1);
+        pthread_t t;
+        if (pthread_create(&t, NULL, watchdog, (void *)(intptr_t)secs) == 0)
+            pthread_detach(t);
+    }
 #endif
 }

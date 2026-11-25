@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #define X(n) PFN_##n n;
@@ -18,6 +19,13 @@ static PFN_vkCreateInstance p_vkCreateInstance;
 static PFN_vkGetInstanceProcAddr p_gipa;
 
 wr_vk g_vk;
+
+/* debug frame dump (wr_vk_dump_target) */
+static wr_vk_buffer g_dump_buf;
+static char g_dump_path[1024];
+static uint32_t g_dump_w, g_dump_h;
+static int g_dump_pending;
+static void write_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h);
 static SDL_Window *g_win;
 
 /* per-frame upload command buffers (recorded lazily, submitted before draws) */
@@ -442,6 +450,7 @@ static void free_dead(wr_vk_frame *f)
     for (int i = 0; i < f->ndead; i++) {
         wr_vk_texture *t = f->dead[i];
         if (t->set) vkFreeDescriptorSets(g_vk.dev, g_vk.tex_pool, 1, &t->set);
+        if (t->alt_set) vkFreeDescriptorSets(g_vk.dev, g_vk.tex_pool, 1, &t->alt_set);
         if (t->view) vkDestroyImageView(g_vk.dev, t->view, NULL);
         if (t->image) vkDestroyImage(g_vk.dev, t->image, NULL);
         if (t->mem) vkFreeMemory(g_vk.dev, t->mem, NULL);
@@ -648,6 +657,29 @@ void wr_vk_texture_update(wr_vk_texture *t, uint32_t x, uint32_t y, uint32_t w, 
         upload_region(t, x, y, w, h, rgba, pitch_px, 0);
 }
 
+VkDescriptorSet wr_vk_texture_alt_set(wr_vk_texture *t, VkSampler sampler)
+{
+    if (t->alt_set && t->alt_sampler == sampler)
+        return t->alt_set;
+    if (!t->alt_set) {
+        VkDescriptorSetAllocateInfo da = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        da.descriptorPool = g_vk.tex_pool;
+        da.descriptorSetCount = 1;
+        da.pSetLayouts = &g_vk.tex_layout;
+        if (vkAllocateDescriptorSets(g_vk.dev, &da, &t->alt_set) != VK_SUCCESS)
+            return t->set;
+    }
+    VkDescriptorImageInfo di = { sampler, t->view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkWriteDescriptorSet wd = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    wd.dstSet = t->alt_set;
+    wd.descriptorCount = 1;
+    wd.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wd.pImageInfo = &di;
+    vkUpdateDescriptorSets(g_vk.dev, 1, &wd, 0, NULL);
+    t->alt_sampler = sampler;
+    return t->alt_set;
+}
+
 void wr_vk_texture_destroy(wr_vk_texture *t)
 {
     if (!t)
@@ -788,12 +820,124 @@ void wr_vk_frame_end(void)
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
         g_vk.need_recreate = 1;
     g_vk.in_frame = 0;
+    if (g_dump_pending) {
+        vkDeviceWaitIdle(g_vk.dev);
+        write_png(g_dump_path, (const uint8_t *)g_dump_buf.map, g_dump_w, g_dump_h);
+        wr_log("vulkan: frame written to %s", g_dump_path);
+        g_dump_pending = 0;
+    }
     g_vk.frame = (g_vk.frame + 1) % WR_VK_FRAMES;
     /* the next slot's staging buffer is reusable once its fence passed:
      * uploads recorded before its frame_begin go into it */
     wr_vk_frame *nf = &g_vk.frames[g_vk.frame];
     vkWaitForFences(g_vk.dev, 1, &nf->fence, VK_TRUE, UINT64_MAX);
     nf->uused = 0;
+}
+
+/* ---- debug dump ----------------------------------------------------------------------------- */
+
+
+static uint32_t crc_table[256];
+static uint32_t crc32_update(uint32_t c, const uint8_t *p, size_t n)
+{
+    if (!crc_table[1])
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t k = i;
+            for (int j = 0; j < 8; j++)
+                k = (k & 1) ? 0xEDB88320u ^ (k >> 1) : k >> 1;
+            crc_table[i] = k;
+        }
+    c = ~c;
+    while (n--)
+        c = crc_table[(c ^ *p++) & 0xFF] ^ (c >> 8);
+    return ~c;
+}
+
+static void put32(FILE *f, uint32_t v)
+{
+    uint8_t b[4] = { (uint8_t)(v >> 24), (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v };
+    fwrite(b, 1, 4, f);
+}
+
+static void chunk(FILE *f, const char *type, const uint8_t *data, uint32_t n)
+{
+    put32(f, n);
+    fwrite(type, 1, 4, f);
+    if (n)
+        fwrite(data, 1, n, f);
+    uint32_t c = crc32_update(0, (const uint8_t *)type, 4);
+    c = crc32_update(c, data, n);
+    put32(f, c);
+}
+
+/* RGBA8 -> PNG, deflate "stored" blocks (no compression: a debug dump). */
+static void write_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    fwrite("\x89PNG\r\n\x1a\n", 1, 8, f);
+    uint8_t ihdr[13] = { (uint8_t)(w >> 24), (uint8_t)(w >> 16), (uint8_t)(w >> 8), (uint8_t)w,
+                         (uint8_t)(h >> 24), (uint8_t)(h >> 16), (uint8_t)(h >> 8), (uint8_t)h, 8, 6, 0, 0, 0 };
+    chunk(f, "IHDR", ihdr, 13);
+    size_t raw_n = (size_t)h * (1 + (size_t)w * 4);
+    uint8_t *raw = (uint8_t *)malloc(raw_n);
+    for (uint32_t y = 0; y < h; y++) {
+        raw[(size_t)y * (1 + w * 4)] = 0;
+        memcpy(raw + (size_t)y * (1 + w * 4) + 1, rgba + (size_t)y * w * 4, (size_t)w * 4);
+    }
+    size_t nblk = (raw_n + 65534) / 65535;
+    size_t zn = 2 + nblk * 5 + raw_n + 4;
+    uint8_t *z = (uint8_t *)malloc(zn), *o = z;
+    *o++ = 0x78; *o++ = 0x01;
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < raw_n; i++) {
+        a = (a + raw[i]) % 65521u;
+        b = (b + a) % 65521u;
+    }
+    for (size_t off = 0; off < raw_n; off += 65535) {
+        size_t n = raw_n - off < 65535 ? raw_n - off : 65535;
+        *o++ = off + n >= raw_n ? 1 : 0;
+        *o++ = (uint8_t)n; *o++ = (uint8_t)(n >> 8);
+        *o++ = (uint8_t)~n; *o++ = (uint8_t)(~n >> 8);
+        memcpy(o, raw + off, n);
+        o += n;
+    }
+    uint32_t ad = (b << 16) | a;
+    *o++ = (uint8_t)(ad >> 24); *o++ = (uint8_t)(ad >> 16); *o++ = (uint8_t)(ad >> 8); *o++ = (uint8_t)ad;
+    chunk(f, "IDAT", z, (uint32_t)(o - z));
+    chunk(f, "IEND", NULL, 0);
+    fclose(f);
+    free(raw);
+    free(z);
+}
+
+void wr_vk_dump_target(wr_vk_target *t, const char *path)
+{
+    if (!t || !g_vk.in_frame || g_vk.in_pass)
+        return;
+    VkDeviceSize need = (VkDeviceSize)t->w * t->h * 4;
+    if (g_dump_buf.size < need) {
+        vkDeviceWaitIdle(g_vk.dev);
+        wr_vk_buffer_destroy(&g_dump_buf);
+        if (!wr_vk_buffer_create(&g_dump_buf, need, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1))
+            return;
+    }
+    VkCommandBuffer cmd = g_vk.frames[g_vk.frame].cmd;
+    barrier(cmd, t->color, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    VkBufferImageCopy c = { 0 };
+    c.imageSubresource = (VkImageSubresourceLayers){ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    c.imageExtent = (VkExtent3D){ t->w, t->h, 1 };
+    vkCmdCopyImageToBuffer(cmd, t->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_dump_buf.buf, 1, &c);
+    barrier(cmd, t->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    snprintf(g_dump_path, sizeof g_dump_path, "%s", path);
+    g_dump_w = t->w;
+    g_dump_h = t->h;
+    g_dump_pending = 1;
 }
 
 /* ---- offscreen targets ------------------------------------------------------------- */

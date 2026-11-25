@@ -67,6 +67,9 @@ int wr_platform_init(void)
         wr_log("platform: headless (no window)");
         return 1;
     }
+    /* SIGINT/SIGTERM must end the process, not become an SDL quit event a
+     * hung guest never reads. */
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
         wr_log("platform: SDL_Init failed: %s", SDL_GetError());
         return 0;
@@ -209,9 +212,12 @@ static uint32_t key_lparam(uint8_t dik, int up, int repeat)
     return l;
 }
 
+extern volatile uint32_t wr_heartbeat;
+
 void w32_pump_events(X86Ctx *ctx)
 {
     (void)ctx;
+    wr_heartbeat++;
     run_timers();
     if (g_headless || !g_sdl_up)
         return;
