@@ -901,3 +901,14 @@ uint32_t w32_main_hwnd(void)
     wwin *w = main_win();
     return w ? w->hwnd : 0;
 }
+
+/* Client size of a window (for native video modules). */
+int w32_window_client(uint32_t hwnd, int *w, int *h)
+{
+    wwin *win = win_get(hwnd);
+    if (!win)
+        return 0;
+    *w = win->w;
+    *h = win->h;
+    return 1;
+}
