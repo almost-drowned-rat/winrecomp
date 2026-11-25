@@ -39,7 +39,8 @@ class Disassembler:
                  force: bool = False,
                  extra_sections: Optional[list] = None,
                  seed_functions: Optional[list] = None,
-                 observed_seeds: Optional[set] = None):
+                 observed_seeds: Optional[set] = None,
+                 data_ranges: Optional[list] = None):
         self.xbe_path = xbe_path
         self.analysis_json = analysis_json
         self.output_dir = output_dir or config.DEFAULT_OUTPUT_DIR
@@ -52,6 +53,8 @@ class Disassembler:
         # Seeds a run actually reached (see _load_seed_functions). They are
         # not guesses, so the mid-instruction guard below does not apply.
         self.observed_seeds = observed_seeds or set()
+        # winrecomp: game.toml [disasm] data_ranges, [start, end) pairs
+        self.data_ranges = list(data_ranges or [])
 
         # Components (initialized during run)
         self.image: Optional[BinaryImage] = None
@@ -98,6 +101,7 @@ class Disassembler:
         if self.verbose:
             print("Phase 1: Loading binary image...")
         self.image = load_image(self.xbe_path, self.analysis_json)
+        self.image.data_ranges = self.data_ranges
         if self.verbose:
             print(f"  Loaded: {self.image.filepath}")
             print(f"  Base: 0x{self.image.base_address:08X}  "

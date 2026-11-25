@@ -460,7 +460,7 @@ _EFLAGS_PRESERVE = frozenset({
     "loop", "loope", "loopne",
     # pushfd READS the flags and leaves them alone, so it belongs here.
     # popfd does NOT -- see _FLAGS_UNDEFINED.
-    "pushfd", "pushal", "pushad", "popal", "popad",
+    "pushfd", "pushal", "pushad", "popal", "popad", "pushaw", "popaw",
     "sgdt", "ljmp", "sfence",
     "stmxcsr", "ldmxcsr",
     # SSE scalar float
@@ -1531,6 +1531,16 @@ class Lifter:
         if m in ("popal", "popad"):
             return ["POP32(esp, edi); POP32(esp, esi); POP32(esp, ebp); esp += 4; "
                     "POP32(esp, ebx); POP32(esp, edx); POP32(esp, ecx); POP32(esp, eax); /* popal */"]
+        # winrecomp: the 16-bit forms (66 60 / 66 61). Eight word slots, 16
+        # bytes; POPAW skips the SP slot and only replaces the low words.
+        # GTA 2's rdtsc reader brackets `rdtsc` with them.
+        if m == "pushaw":
+            return ["{ uint32_t _pa_sp = esp; uint32_t _pa_r[8] = { eax, ecx, edx, ebx, _pa_sp, ebp, esi, edi }; "
+                    "for (int _i = 0; _i < 8; _i++) { esp -= 2; MEM16(esp) = (uint16_t)_pa_r[_i]; } } /* pushaw */"]
+        if m == "popaw":
+            return ["SET_LO16(edi, MEM16(esp)); SET_LO16(esi, MEM16(esp + 2)); SET_LO16(ebp, MEM16(esp + 4)); "
+                    "SET_LO16(ebx, MEM16(esp + 8)); SET_LO16(edx, MEM16(esp + 10)); SET_LO16(ecx, MEM16(esp + 12)); "
+                    "SET_LO16(eax, MEM16(esp + 14)); esp += 16; /* popaw */"]
 
         # ── Arithmetic ──
         if m in ("add", "sub", "and", "or", "xor"):

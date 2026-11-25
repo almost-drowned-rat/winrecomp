@@ -275,6 +275,18 @@ class FunctionDetector:
                 continue
             if not in_a_gap(nxt):
                 continue                    # an out-of-line tail, not a start
+            # An embedded switch table parked after the ret, usually behind
+            # MSVC's `npad 2` (mov edi, edi). The padding probes as a hotpatch
+            # prologue, so without this the table became a "function" whose
+            # body is the table's pointers decoded as code (GTA 2: five of
+            # them, arpl/bound/les garbage).
+            if self._table_after(nxt, nxt + 0x10000) is not None:
+                continue
+            # The same for a table too short for resync_jump_tables to measure
+            # (a two-case switch, usually with a byte-index table behind it):
+            # an indexed jmp names it as its displacement.
+            if any(nxt <= t < nxt + 16 for t in self.engine._jt_candidates):
+                continue
             # A prologue, or a whole small function.
             #
             # MSVC packs runs of constant-returning accessors -- "mov eax,
@@ -406,6 +418,8 @@ class FunctionDetector:
 
     def _add_candidate(self, addr: int, confidence: float, method: str) -> None:
         """Add a function start candidate, keeping highest confidence."""
+        if self.image.in_data_range(addr):
+            return                          # game.toml [disasm] data_ranges
         existing = self._candidates.get(addr)
         if existing is None or confidence > existing[0]:
             self._candidates[addr] = (confidence, method)
@@ -826,14 +840,18 @@ class FunctionDetector:
         starts = [b[0] for b in bodies]
         added = False
 
-        for insn in self.engine.instructions.values():
+        for insn in list(self.engine.instructions.values()):
             if not insn.is_jump or insn.is_cond_jump:
                 continue
             target = insn.jump_target
             if target is None or target in self._candidates:
                 continue
-            if target not in self.engine.instructions:
-                continue
+            # winrecomp: a target the sweep stepped over (it came out of phase
+            # in a byte-index or jump table right before the function) is
+            # decoded there below, once the jump is known to be a real tail
+            # jump out of a real body. GTA 2: 0x004AD310 and 0x004504D0, both
+            # proper functions reached only by `jmp`, were no-op stubs.
+            undecoded = target not in self.engine.instructions
 
             # The jump is a tail jump only if it leaves its own function.
             i = bisect.bisect_right(starts, insn.address) - 1
@@ -848,6 +866,13 @@ class FunctionDetector:
             section = self.image.get_section_at_va(target)
             if section is None or not section.executable:
                 continue
+            if undecoded:
+                # Same corroboration as an undecoded call target: the bytes
+                # must decode as a function body.
+                if (self.image.in_data_range(target)
+                        or not self.engine.probes_as_function_body(target)
+                        or not self.engine.decode_at(target)):
+                    continue
 
             # Does the target land inside some *other* function? The CRT does
             # this constantly -- _startOneArgErrorHandling jumps into the middle

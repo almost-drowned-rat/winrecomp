@@ -104,6 +104,7 @@ def main():
         text_only = args.text_only
         seed_funcs = []
         observed = set()
+        data_ranges = []
         if args.game_config:
             from .. import gameconfig
             cfg = gameconfig.load(args.game_config, args.xbe_path)
@@ -113,6 +114,10 @@ def main():
             # [disasm] text_only (agent O, Orta: an executable-flagged data section decoded as code); the
             # flag on the command line can only add it
             text_only = text_only or bool(cfg.disasm.get("text_only", False))
+            for rng in cfg.disasm.get("data_ranges", []):
+                if len(rng) != 2 or not rng[0] < rng[1]:
+                    raise ValueError(f"[disasm] data_ranges entry {rng!r}: need [start, end)")
+                data_ranges.append((int(rng[0]), int(rng[1])))
             if not args.seed_functions:
                 for addr, seen in cfg.seeds:
                     seed_funcs.append(addr)
@@ -135,6 +140,7 @@ def main():
             extra_sections=extra,
             seed_functions=seed_funcs,
             observed_seeds=observed,
+            data_ranges=data_ranges,
         )
         success = disassembler.run()
         sys.exit(0 if success else 1)

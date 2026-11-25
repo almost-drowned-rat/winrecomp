@@ -17,6 +17,9 @@ game.toml:
     extra_sections = ["XIPS"]              #   --extra-sections
     text_only = true                       #   --text-only: only .text (+ extra_sections) is code - for a title
                                            #   with executable-flagged data or DSP sections (Orta APPDATA, DOLBY)
+    data_ranges = [[0x4D17C0, 0x4D27E9]]   #   winrecomp: [start, end) ranges inside code sections that are data
+                                           #   (tables a statically linked library parks in .text); no function
+                                           #   starts there
     [recomp]
     split = 1000                           #   --split
     exclude_manual = "../src/game/recomp/recomp_manual.c"   # --exclude-manual
@@ -56,7 +59,7 @@ except ImportError:          # Python < 3.11
 
 _COMMON_KEYS = {"schema_version", "game", "disasm", "recomp", "variant"}
 _GAME_KEYS = {"title"}
-_DISASM_KEYS = {"extra_sections": list, "text_only": bool}
+_DISASM_KEYS = {"extra_sections": list, "text_only": bool, "data_ranges": list}
 _RECOMP_KEYS = {"split": int, "exclude_manual": str, "weak_functions": bool}
 _VARIANT_REF_KEYS = {"label", "sha256", "file"}
 _VARIANT_KEYS = {"schema_version", "partitions", "disasm", "recomp", "function", "hook", "switch"}

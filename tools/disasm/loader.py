@@ -69,6 +69,9 @@ class BinaryImage:
 
     sections: List[SectionInfo] = field(default_factory=list)
     kernel_imports: List[KernelImport] = field(default_factory=list)
+    # winrecomp: [start, end) ranges inside code sections known to be data
+    # (game.toml [disasm] data_ranges). No function may start there.
+    data_ranges: List[Tuple[int, int]] = field(default_factory=list)
 
     # Lookup tables built after loading
     _section_by_name: Dict[str, SectionInfo] = field(default_factory=dict, repr=False)
@@ -77,6 +80,9 @@ class BinaryImage:
     def __post_init__(self):
         self._section_by_name = {s.name: s for s in self.sections}
         self._thunk_to_import = {ki.thunk_addr: ki for ki in self.kernel_imports}
+
+    def in_data_range(self, va: int) -> bool:
+        return any(lo <= va < hi for lo, hi in self.data_ranges)
 
     def get_section(self, name: str) -> Optional[SectionInfo]:
         """Get section by name."""
