@@ -5,10 +5,16 @@
  * Android Mali/Adreno drivers, old Intel). Functions are loaded through SDL's
  * loader, so nothing links against a Vulkan library.
  *
- * Model: one render pass (colour = swapchain image, optional depth), two
- * frames in flight, a persistently mapped streaming vertex buffer per frame,
- * descriptor pool reset per frame. The game layer records draws between
- * wr_vk_begin_frame and wr_vk_end_frame.
+ * Model: two frames in flight, a persistently mapped streaming vertex buffer
+ * and a staging buffer per frame. The game draws into an offscreen target
+ * (colour + depth, render resolution); the present pass then puts it on the
+ * swapchain image (scaled, pillar/letterboxed, or through a post chain) and
+ * draws overlays:
+ *
+ *   cmd = wr_vk_frame_begin();
+ *   wr_vk_target_begin(t, ...);  draws  wr_vk_target_end();     (any number)
+ *   wr_vk_present_begin(clear);  blit + overlays  wr_vk_present_end();
+ *   wr_vk_frame_end();
  */
 #ifndef WR_VK_H
 #define WR_VK_H
@@ -108,11 +114,11 @@ typedef struct wr_vk {
     VkImage images[8];
     VkImageView views[8];
     VkFramebuffer fbs[8];
-    VkImage depth;
-    VkImageView depth_view;
-    VkDeviceMemory depth_mem;
     VkFormat depth_format;
-    VkRenderPass pass;
+    VkRenderPass present_clear;   /* swapchain, colour only, cleared */
+    VkRenderPass present_load;    /* swapchain, colour only, kept (after a post chain) */
+    VkRenderPass target_clear;    /* offscreen colour + depth, colour cleared */
+    VkRenderPass target_load;     /* offscreen colour + depth, colour kept */
     int vsync;
     int need_recreate;
 
@@ -120,6 +126,8 @@ typedef struct wr_vk {
     uint32_t frame;              /* index into frames */
     uint32_t image;              /* acquired swapchain image */
     int in_frame;
+    int in_pass;
+    int presented_pass;          /* present pass recorded this frame */
 
     VkDescriptorSetLayout tex_layout;   /* binding 0: combined image sampler */
     VkDescriptorPool tex_pool;          /* permanent texture sets */
@@ -133,10 +141,32 @@ int  wr_vk_init(struct SDL_Window *window, int vsync);
 void wr_vk_shutdown(void);
 void wr_vk_set_vsync(int on);
 
-/* Frame: returns the command buffer inside the render pass (cleared to
- * clear_rgba), or NULL when nothing can be drawn (minimised window). */
-VkCommandBuffer wr_vk_begin_frame(const float clear_rgba[4]);
-void wr_vk_end_frame(void);
+/* Offscreen render target: RGBA8 colour (sampled by the present pass) and a
+ * depth buffer. Colour persists between passes; depth is cleared at each
+ * wr_vk_target_begin. */
+typedef struct wr_vk_target {
+    uint32_t w, h;
+    VkImage color, depth;
+    VkImageView color_view, depth_view;
+    VkDeviceMemory color_mem, depth_mem;
+    VkFramebuffer fb;
+    VkDescriptorSet set;          /* colour as a sampled texture */
+} wr_vk_target;
+
+wr_vk_target *wr_vk_target_create(uint32_t w, uint32_t h, VkSampler sampler);
+void wr_vk_target_destroy(wr_vk_target *t);
+
+/* Frame: the command buffer outside any render pass, or NULL when nothing
+ * can be drawn this frame (minimised window, swapchain being rebuilt). */
+VkCommandBuffer wr_vk_frame_begin(void);
+void wr_vk_target_begin(wr_vk_target *t, int clear, const float clear_rgba[4]);
+void wr_vk_target_end(void);
+/* The swapchain image of this frame (for a post chain writing into it). */
+VkImage wr_vk_swap_image(void);
+VkImageView wr_vk_swap_view(void);
+void wr_vk_present_begin(int clear, const float clear_rgba[4]);
+void wr_vk_present_end(void);
+void wr_vk_frame_end(void);
 
 /* Streaming vertices for the current frame: copies n bytes, returns the
  * byte offset in the frame's vertex buffer (VK_WHOLE_SIZE when full). */
@@ -149,6 +179,12 @@ wr_vk_texture *wr_vk_texture_create(uint32_t w, uint32_t h, const uint32_t *rgba
 void wr_vk_texture_update(wr_vk_texture *t, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                           const uint32_t *rgba, uint32_t src_pitch_px);
 void wr_vk_texture_destroy(wr_vk_texture *t);
+
+/* Present pass: draw a target into (x, y, w, h) of the swapchain image with
+ * the given gamma (1.0 = none). */
+void wr_vk_blit(VkCommandBuffer cmd, wr_vk_target *t, int x, int y, int w, int h, float gamma);
+/* Largest aw:ah rectangle centred in sw x sh (pillar/letterbox). */
+void wr_vk_fit_rect(uint32_t sw, uint32_t sh, uint32_t aw, uint32_t ah, int *x, int *y, int *w, int *h);
 
 /* Pipelines */
 VkShaderModule wr_vk_shader(const uint32_t *spirv, size_t bytes);

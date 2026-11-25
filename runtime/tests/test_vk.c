@@ -21,16 +21,26 @@ int main(void)
     wr_vk_texture *t = wr_vk_texture_create(64, 64, px, s);
     uint64_t t0 = SDL_GetTicksNS();
     int frames = 0;
+    wr_vk_target *tg = wr_vk_target_create(640, 480, s);
     for (int f = 0; f < 120; f++) {
         SDL_Event e; while (SDL_PollEvent(&e)) {}
         float c[4] = { f / 120.0f, 0.2f, 0.4f, 1 };
-        VkCommandBuffer cmd = wr_vk_begin_frame(c);
+        VkCommandBuffer cmd = wr_vk_frame_begin();
         if (!cmd) continue;
         if (f == 30) wr_vk_texture_update(t, 0, 0, 32, 32, px, 64);
         if (f == 60) { wr_vk_texture_destroy(t); t = wr_vk_texture_create(128, 128, NULL, s); }
-        wr_vk_end_frame();
+        wr_vk_target_begin(tg, 1, c);
+        wr_vk_target_end();
+        float black[4] = { 0, 0, 0, 1 };
+        wr_vk_present_begin(1, black);
+        int x, y, w2, h2;
+        wr_vk_fit_rect(g_vk.extent.width, g_vk.extent.height, 4, 3, &x, &y, &w2, &h2);
+        wr_vk_blit(cmd, tg, x, y, w2, h2, 1.0f);
+        wr_vk_present_end();
+        wr_vk_frame_end();
         frames++;
     }
+    wr_vk_target_destroy(tg);
     double sec = (SDL_GetTicksNS() - t0) / 1e9;
     printf("vk: %d frames in %.2f s (%.1f fps, vsync)\n", frames, sec, frames / sec);
     wr_vk_texture_destroy(t);

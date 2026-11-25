@@ -84,12 +84,6 @@ static void destroy_swapchain_parts(void)
         g_vk.fbs[i] = VK_NULL_HANDLE;
         g_vk.views[i] = VK_NULL_HANDLE;
     }
-    if (g_vk.depth_view) vkDestroyImageView(g_vk.dev, g_vk.depth_view, NULL);
-    if (g_vk.depth) vkDestroyImage(g_vk.dev, g_vk.depth, NULL);
-    if (g_vk.depth_mem) vkFreeMemory(g_vk.dev, g_vk.depth_mem, NULL);
-    g_vk.depth_view = VK_NULL_HANDLE;
-    g_vk.depth = VK_NULL_HANDLE;
-    g_vk.depth_mem = VK_NULL_HANDLE;
 }
 
 static int create_swapchain(void)
@@ -170,33 +164,6 @@ static int create_swapchain(void)
     g_vk.nimages = 8;
     VK_CHECK(vkGetSwapchainImagesKHR(g_vk.dev, g_vk.swapchain, &g_vk.nimages, g_vk.images), "swapchain images");
 
-    /* depth */
-    VkImageCreateInfo di = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-    di.imageType = VK_IMAGE_TYPE_2D;
-    di.format = g_vk.depth_format;
-    di.extent = (VkExtent3D){ ext.width, ext.height, 1 };
-    di.mipLevels = 1;
-    di.arrayLayers = 1;
-    di.samples = VK_SAMPLE_COUNT_1_BIT;
-    di.tiling = VK_IMAGE_TILING_OPTIMAL;
-    di.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
-    VK_CHECK(vkCreateImage(g_vk.dev, &di, NULL, &g_vk.depth), "depth image");
-    VkMemoryRequirements mr;
-    vkGetImageMemoryRequirements(g_vk.dev, g_vk.depth, &mr);
-    VkMemoryAllocateInfo ai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-    ai.allocationSize = mr.size;
-    ai.memoryTypeIndex = wr_vk_memtype(mr.memoryTypeBits, VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT);
-    if (ai.memoryTypeIndex == UINT32_MAX)
-        ai.memoryTypeIndex = wr_vk_memtype(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VK_CHECK(vkAllocateMemory(g_vk.dev, &ai, NULL, &g_vk.depth_mem), "depth memory");
-    VK_CHECK(vkBindImageMemory(g_vk.dev, g_vk.depth, g_vk.depth_mem, 0), "depth bind");
-    VkImageViewCreateInfo dv = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    dv.image = g_vk.depth;
-    dv.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    dv.format = g_vk.depth_format;
-    dv.subresourceRange = (VkImageSubresourceRange){ VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-    VK_CHECK(vkCreateImageView(g_vk.dev, &dv, NULL, &g_vk.depth_view), "depth view");
-
     for (uint32_t i = 0; i < g_vk.nimages; i++) {
         VkImageViewCreateInfo vi = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
         vi.image = g_vk.images[i];
@@ -204,11 +171,10 @@ static int create_swapchain(void)
         vi.format = g_vk.format;
         vi.subresourceRange = (VkImageSubresourceRange){ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         VK_CHECK(vkCreateImageView(g_vk.dev, &vi, NULL, &g_vk.views[i]), "swapchain view");
-        VkImageView att[2] = { g_vk.views[i], g_vk.depth_view };
         VkFramebufferCreateInfo fi = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-        fi.renderPass = g_vk.pass;
-        fi.attachmentCount = 2;
-        fi.pAttachments = att;
+        fi.renderPass = g_vk.present_clear;   /* compatible with present_load */
+        fi.attachmentCount = 1;
+        fi.pAttachments = &g_vk.views[i];
         fi.width = ext.width;
         fi.height = ext.height;
         fi.layers = 1;
@@ -227,17 +193,19 @@ static int recreate_swapchain(void)
 
 /* ---- init ---------------------------------------------------------------------------------- */
 
-static int create_render_pass(void)
+/* colour (+ depth) pass; colour cleared or kept; the colour ends in `final` */
+static VkRenderPass make_pass(VkFormat color, VkImageLayout initial, VkImageLayout final, int clear, int depth)
 {
-    VkAttachmentDescription a[2] = { { 0 }, { 0 } };
-    a[0].format = g_vk.format;
+    VkAttachmentDescription a[2];
+    memset(a, 0, sizeof a);
+    a[0].format = color;
     a[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    a[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    a[0].loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
     a[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     a[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     a[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    a[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    a[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    a[0].initialLayout = clear ? VK_IMAGE_LAYOUT_UNDEFINED : initial;
+    a[0].finalLayout = final;
     a[1].format = g_vk.depth_format;
     a[1].samples = VK_SAMPLE_COUNT_1_BIT;
     a[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -248,26 +216,54 @@ static int create_render_pass(void)
     a[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     VkAttachmentReference cref = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
     VkAttachmentReference dref = { 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
-    VkSubpassDescription sp = { 0 };
+    VkSubpassDescription sp;
+    memset(&sp, 0, sizeof sp);
     sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sp.colorAttachmentCount = 1;
     sp.pColorAttachments = &cref;
-    sp.pDepthStencilAttachment = &dref;
-    VkSubpassDependency dep = { 0 };
-    dep.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dep.dstSubpass = 0;
-    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    sp.pDepthStencilAttachment = depth ? &dref : NULL;
+    VkSubpassDependency dep[2];
+    memset(dep, 0, sizeof dep);
+    dep[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dep[0].dstSubpass = 0;
+    dep[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+                        | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dep[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+                        | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dep[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dep[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                         | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    /* the colour is sampled afterwards (target) or presented (swapchain) */
+    dep[1].srcSubpass = 0;
+    dep[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dep[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+    dep[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dep[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
     VkRenderPassCreateInfo ci = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
-    ci.attachmentCount = 2;
+    ci.attachmentCount = depth ? 2 : 1;
     ci.pAttachments = a;
     ci.subpassCount = 1;
     ci.pSubpasses = &sp;
-    ci.dependencyCount = 1;
-    ci.pDependencies = &dep;
-    VK_CHECK(vkCreateRenderPass(g_vk.dev, &ci, NULL, &g_vk.pass), "vkCreateRenderPass");
-    return 1;
+    ci.dependencyCount = 2;
+    ci.pDependencies = dep;
+    VkRenderPass rp = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(g_vk.dev, &ci, NULL, &rp) != VK_SUCCESS)
+        wr_log("vulkan: vkCreateRenderPass failed");
+    return rp;
+}
+
+static int create_render_passes(void)
+{
+    g_vk.present_clear = make_pass(g_vk.format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1, 0);
+    /* after a post chain the swapchain image is in COLOR_ATTACHMENT_OPTIMAL */
+    g_vk.present_load = make_pass(g_vk.format, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, 0);
+    g_vk.target_clear = make_pass(VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1, 1);
+    g_vk.target_load = make_pass(VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 1);
+    return g_vk.present_clear && g_vk.present_load && g_vk.target_clear && g_vk.target_load;
 }
 
 int wr_vk_init(SDL_Window *window, int vsync)
@@ -386,7 +382,7 @@ int wr_vk_init(SDL_Window *window, int vsync)
     g_vk.depth_format = (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
                             ? VK_FORMAT_D32_SFLOAT : VK_FORMAT_D16_UNORM;
 
-    if (!create_render_pass())
+    if (!create_render_passes())
         return 0;
     if (!create_swapchain())
         g_vk.need_recreate = 1;
@@ -474,7 +470,10 @@ void wr_vk_shutdown(void)
     if (g_vk.swapchain) vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
     vkDestroyDescriptorPool(g_vk.dev, g_vk.tex_pool, NULL);
     vkDestroyDescriptorSetLayout(g_vk.dev, g_vk.tex_layout, NULL);
-    vkDestroyRenderPass(g_vk.dev, g_vk.pass, NULL);
+    vkDestroyRenderPass(g_vk.dev, g_vk.present_clear, NULL);
+    vkDestroyRenderPass(g_vk.dev, g_vk.present_load, NULL);
+    vkDestroyRenderPass(g_vk.dev, g_vk.target_clear, NULL);
+    vkDestroyRenderPass(g_vk.dev, g_vk.target_load, NULL);
     vkDestroyDevice(g_vk.dev, NULL);
     vkDestroySurfaceKHR(g_vk.instance, g_vk.surface, NULL);
     vkDestroyInstance(g_vk.instance, NULL);
@@ -663,7 +662,7 @@ void wr_vk_texture_destroy(wr_vk_texture *t)
 
 /* ---- frames ------------------------------------------------------------------------------- */
 
-VkCommandBuffer wr_vk_begin_frame(const float clear[4])
+VkCommandBuffer wr_vk_frame_begin(void)
 {
     if (!g_vk.ready || g_vk.in_frame)
         return NULL;
@@ -686,34 +685,79 @@ VkCommandBuffer wr_vk_begin_frame(const float clear[4])
         g_vk.need_recreate = 1;
     vkResetFences(g_vk.dev, 1, &f->fence);
     vkResetCommandPool(g_vk.dev, f->pool, 0);
-    /* the upload buffer of this slot may hold uploads recorded since the
-     * previous frame ended: they are submitted with this frame, keep them */
     f->vused = 0;
-
     VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(f->cmd, &bi);
-    VkClearValue cv[2];
-    memcpy(cv[0].color.float32, clear, sizeof(float) * 4);
-    cv[1].depthStencil.depth = 1.0f;
-    cv[1].depthStencil.stencil = 0;
-    VkRenderPassBeginInfo rp = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-    rp.renderPass = g_vk.pass;
-    rp.framebuffer = g_vk.fbs[g_vk.image];
-    rp.renderArea.extent = g_vk.extent;
-    rp.clearValueCount = 2;
-    rp.pClearValues = cv;
-    vkCmdBeginRenderPass(f->cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
     g_vk.in_frame = 1;
+    g_vk.in_pass = 0;
+    g_vk.presented_pass = 0;
     return f->cmd;
 }
 
-void wr_vk_end_frame(void)
+void wr_vk_target_begin(wr_vk_target *t, int clear, const float rgba[4])
+{
+    if (!g_vk.in_frame || g_vk.in_pass || !t)
+        return;
+    VkClearValue cv[2];
+    memset(cv, 0, sizeof cv);
+    if (rgba)
+        memcpy(cv[0].color.float32, rgba, sizeof(float) * 4);
+    cv[1].depthStencil.depth = 1.0f;
+    VkRenderPassBeginInfo rp = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+    rp.renderPass = clear ? g_vk.target_clear : g_vk.target_load;
+    rp.framebuffer = t->fb;
+    rp.renderArea.extent = (VkExtent2D){ t->w, t->h };
+    rp.clearValueCount = 2;
+    rp.pClearValues = cv;
+    vkCmdBeginRenderPass(g_vk.frames[g_vk.frame].cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+    g_vk.in_pass = 1;
+}
+
+void wr_vk_target_end(void)
+{
+    if (g_vk.in_pass) {
+        vkCmdEndRenderPass(g_vk.frames[g_vk.frame].cmd);
+        g_vk.in_pass = 0;
+    }
+}
+
+VkImage wr_vk_swap_image(void) { return g_vk.images[g_vk.image]; }
+VkImageView wr_vk_swap_view(void) { return g_vk.views[g_vk.image]; }
+
+void wr_vk_present_begin(int clear, const float rgba[4])
+{
+    if (!g_vk.in_frame || g_vk.in_pass)
+        return;
+    VkClearValue cv;
+    memset(&cv, 0, sizeof cv);
+    if (rgba)
+        memcpy(cv.color.float32, rgba, sizeof(float) * 4);
+    VkRenderPassBeginInfo rp = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+    rp.renderPass = clear ? g_vk.present_clear : g_vk.present_load;
+    rp.framebuffer = g_vk.fbs[g_vk.image];
+    rp.renderArea.extent = g_vk.extent;
+    rp.clearValueCount = 1;
+    rp.pClearValues = &cv;
+    vkCmdBeginRenderPass(g_vk.frames[g_vk.frame].cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+    g_vk.in_pass = 1;
+    g_vk.presented_pass = 1;
+}
+
+void wr_vk_present_end(void) { wr_vk_target_end(); }
+
+void wr_vk_frame_end(void)
 {
     if (!g_vk.in_frame)
         return;
     wr_vk_frame *f = &g_vk.frames[g_vk.frame];
-    vkCmdEndRenderPass(f->cmd);
+    if (g_vk.in_pass)
+        wr_vk_target_end();
+    if (!g_vk.presented_pass) {   /* nothing put on the swapchain image: present black */
+        float black[4] = { 0, 0, 0, 1 };
+        wr_vk_present_begin(1, black);
+        wr_vk_present_end();
+    }
     vkEndCommandBuffer(f->cmd);
     VkCommandBuffer cmds[2];
     uint32_t nc = 0;
@@ -745,11 +789,111 @@ void wr_vk_end_frame(void)
         g_vk.need_recreate = 1;
     g_vk.in_frame = 0;
     g_vk.frame = (g_vk.frame + 1) % WR_VK_FRAMES;
-    /* the next slot's staging buffer is free once its fence passed; uploads
-     * recorded before its begin_frame wait for that in staging() */
+    /* the next slot's staging buffer is reusable once its fence passed:
+     * uploads recorded before its frame_begin go into it */
     wr_vk_frame *nf = &g_vk.frames[g_vk.frame];
     vkWaitForFences(g_vk.dev, 1, &nf->fence, VK_TRUE, UINT64_MAX);
     nf->uused = 0;
+}
+
+/* ---- offscreen targets ------------------------------------------------------------- */
+
+static int make_image(VkFormat fmt, uint32_t w, uint32_t h, VkImageUsageFlags usage, VkImageAspectFlags aspect,
+                      VkImage *img, VkDeviceMemory *mem, VkImageView *view)
+{
+    VkImageCreateInfo ii = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = fmt;
+    ii.extent = (VkExtent3D){ w, h, 1 };
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = usage;
+    VK_CHECK(vkCreateImage(g_vk.dev, &ii, NULL, img), "target image");
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(g_vk.dev, *img, &mr);
+    VkMemoryAllocateInfo ai = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    ai.allocationSize = mr.size;
+    ai.memoryTypeIndex = UINT32_MAX;
+    if (usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT)
+        ai.memoryTypeIndex = wr_vk_memtype(mr.memoryTypeBits, VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT);
+    if (ai.memoryTypeIndex == UINT32_MAX)
+        ai.memoryTypeIndex = wr_vk_memtype(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VK_CHECK(vkAllocateMemory(g_vk.dev, &ai, NULL, mem), "target memory");
+    VK_CHECK(vkBindImageMemory(g_vk.dev, *img, *mem, 0), "target bind");
+    VkImageViewCreateInfo vi = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vi.image = *img;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = fmt;
+    vi.subresourceRange = (VkImageSubresourceRange){ aspect, 0, 1, 0, 1 };
+    VK_CHECK(vkCreateImageView(g_vk.dev, &vi, NULL, view), "target view");
+    return 1;
+}
+
+wr_vk_target *wr_vk_target_create(uint32_t w, uint32_t h, VkSampler sampler)
+{
+    if (!g_vk.ready || !w || !h)
+        return NULL;
+    wr_vk_target *t = (wr_vk_target *)calloc(1, sizeof *t);
+    t->w = w;
+    t->h = h;
+    if (!make_image(VK_FORMAT_R8G8B8A8_UNORM, w, h,
+                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                    VK_IMAGE_ASPECT_COLOR_BIT, &t->color, &t->color_mem, &t->color_view) ||
+        !make_image(g_vk.depth_format, w, h,
+                    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+                    VK_IMAGE_ASPECT_DEPTH_BIT, &t->depth, &t->depth_mem, &t->depth_view)) {
+        wr_vk_target_destroy(t);
+        return NULL;
+    }
+    VkImageView att[2] = { t->color_view, t->depth_view };
+    VkFramebufferCreateInfo fi = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+    fi.renderPass = g_vk.target_clear;
+    fi.attachmentCount = 2;
+    fi.pAttachments = att;
+    fi.width = w;
+    fi.height = h;
+    fi.layers = 1;
+    if (vkCreateFramebuffer(g_vk.dev, &fi, NULL, &t->fb) != VK_SUCCESS) {
+        wr_vk_target_destroy(t);
+        return NULL;
+    }
+    VkDescriptorSetAllocateInfo da = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    da.descriptorPool = g_vk.tex_pool;
+    da.descriptorSetCount = 1;
+    da.pSetLayouts = &g_vk.tex_layout;
+    if (vkAllocateDescriptorSets(g_vk.dev, &da, &t->set) == VK_SUCCESS) {
+        VkDescriptorImageInfo di = { sampler, t->color_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkWriteDescriptorSet wd = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        wd.dstSet = t->set;
+        wd.descriptorCount = 1;
+        wd.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        wd.pImageInfo = &di;
+        vkUpdateDescriptorSets(g_vk.dev, 1, &wd, 0, NULL);
+    }
+    /* the load pass expects SHADER_READ_ONLY: start there (black) */
+    VkCommandBuffer cmd = upload_cmd();
+    barrier(cmd, t->color, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0,
+            VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    wr_log("vulkan: render target %ux%u", w, h);
+    return t;
+}
+
+void wr_vk_target_destroy(wr_vk_target *t)
+{
+    if (!t)
+        return;
+    vkDeviceWaitIdle(g_vk.dev);
+    if (t->set) vkFreeDescriptorSets(g_vk.dev, g_vk.tex_pool, 1, &t->set);
+    if (t->fb) vkDestroyFramebuffer(g_vk.dev, t->fb, NULL);
+    if (t->color_view) vkDestroyImageView(g_vk.dev, t->color_view, NULL);
+    if (t->depth_view) vkDestroyImageView(g_vk.dev, t->depth_view, NULL);
+    if (t->color) vkDestroyImage(g_vk.dev, t->color, NULL);
+    if (t->depth) vkDestroyImage(g_vk.dev, t->depth, NULL);
+    if (t->color_mem) vkFreeMemory(g_vk.dev, t->color_mem, NULL);
+    if (t->depth_mem) vkFreeMemory(g_vk.dev, t->depth_mem, NULL);
+    free(t);
 }
 
 VkDeviceSize wr_vk_push_verts(const void *data, VkDeviceSize n)

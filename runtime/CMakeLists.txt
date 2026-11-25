@@ -18,12 +18,18 @@ add_library(winrecomp_rt STATIC
     src/win32/misc.c
     src/libs/miles_bink_silent.c
     src/vk/wr_vk.c
+    src/vk/wr_vk_blit.c
+    src/post/shader_pass.c
 )
+
+# Slang shader packs (media/shaders -> data/shaders), from option-c src/shaderpack
+add_subdirectory(src/shaderpack ${CMAKE_CURRENT_BINARY_DIR}/shaderpack)
+
 target_include_directories(winrecomp_rt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/../templates/runtime)
-target_link_libraries(winrecomp_rt PUBLIC SDL3::SDL3 m)
+target_link_libraries(winrecomp_rt PUBLIC SDL3::SDL3 xbox_shaderpack m)
 set_target_properties(winrecomp_rt PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 if(NOT MSVC)
     target_compile_options(winrecomp_rt PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fwrapv -fno-strict-aliasing)
