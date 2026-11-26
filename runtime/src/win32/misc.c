@@ -136,6 +136,33 @@ void wr_reg_set_dword(const char *key, const char *name, uint32_t value)
     w32_registry_save();
 }
 
+/* Port hook: set a string value (REG_SZ) and write the file at once. */
+void wr_reg_set_str(const char *key, const char *name, const char *str)
+{
+    w32_registry_load();
+    rval *v = val_find(key_find(key, 1), name, 1);
+    uint32_t len = (uint32_t)strlen(str) + 1;
+    if (v->data && v->type == 1 && v->len == len && !memcmp(v->data, str, len))
+        return;
+    val_set(v, 1, str, len);
+    g_reg_dirty = 1;
+    w32_registry_save();
+}
+
+/* Port hook: read a string value into out (cap bytes); 1 if present. */
+int wr_reg_get_str(const char *key, const char *name, char *out, size_t cap)
+{
+    w32_registry_load();
+    rkey *k = key_find(key, 0);
+    rval *v = k ? val_find(k, name, 0) : NULL;
+    if (!v || (v->type != 1 && v->type != 2) || !cap)
+        return 0;
+    size_t n = v->len < cap ? v->len : cap - 1;
+    memcpy(out, v->data, n);
+    out[n] = 0;
+    return 1;
+}
+
 void wr_reg_default_dword(const char *key, const char *name, uint32_t value)
 {
     wr_reg_default(key, name, 4, &value, 4);

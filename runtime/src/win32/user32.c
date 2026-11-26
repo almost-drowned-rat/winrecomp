@@ -288,12 +288,20 @@ void w32_pump_events(X86Ctx *ctx)
                 post(hwnd, WM_ACTIVATE, 1, 0, 0);
             }
             break;
-        case SDL_EVENT_WINDOW_FOCUS_LOST:
-            if (hwnd) {
+        case SDL_EVENT_WINDOW_FOCUS_LOST: {
+            /* WR_IGNORE_FOCUS=1 (scripted test runs): the game keeps running
+             * when another window has the focus */
+            static int ignore = -1;
+            if (ignore < 0) {
+                const char *e = getenv("WR_IGNORE_FOCUS");
+                ignore = e && *e == '1';
+            }
+            if (hwnd && !ignore) {
                 post(hwnd, WM_ACTIVATE, 0, 0, 0);
                 post(hwnd, WM_ACTIVATEAPP, 0, 0, 0);
             }
             break;
+        }
         default:
             break;
         }
