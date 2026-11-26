@@ -11,6 +11,7 @@
 #include "wr.h"
 
 #include <SDL3/SDL.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -131,4 +132,21 @@ void wr_pad_dik(uint8_t st[256])
 {
     for (int i = 0; i < 256; i++)
         st[i] |= g_down[i];
+}
+
+/* The left stick of the first connected pad, -1..1 each (x right, y down);
+ * 0 when there is none. WR_FAKE_STICK="x,y" (dev runs) overrides it. */
+int wr_pad_stick(float *x, float *y)
+{
+    *x = *y = 0;
+    const char *f = getenv("WR_FAKE_STICK");
+    if (f && *f && sscanf(f, "%f,%f", x, y) == 2)
+        return 1;
+    for (int k = 0; k < 4; k++)
+        if (g_pads[k]) {
+            *x = SDL_GetGamepadAxis(g_pads[k], SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+            *y = SDL_GetGamepadAxis(g_pads[k], SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+            return 1;
+        }
+    return 0;
 }

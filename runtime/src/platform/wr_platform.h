@@ -32,6 +32,8 @@ void wr_pad_set_map(wr_pad_map_fn fn);
 void wr_pad_event(const void *sdl_event);
 void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up));
 void wr_pad_dik(uint8_t st[256]);
+/* left stick of the first pad, -1..1 (x right, y down); 0 = no pad */
+int  wr_pad_stick(float *x, float *y);
 int  wr_pad_count(void);
 
 /* Scripted test input (WR_INPUT). */
