@@ -7,6 +7,7 @@
 #include "w32_internal.h"
 
 #include <stdlib.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <time.h>
 
@@ -717,13 +718,49 @@ typedef struct wfile {
     FILE *f;
     int   console;    /* 1 in, 2 out, 3 err */
     char  path[1200];
+    int   atomic;     /* f writes path.tmp; closing makes it path (crash-safe replace) */
 } wfile;
 
+/* A file the game replaces (CREATE_ALWAYS / TRUNCATE_EXISTING / CREATE_NEW) is
+ * written to "<name>.tmp" and only renamed over the old one when the handle is
+ * closed, after its data reached the disk: a crash or power loss while saving
+ * leaves the old save intact, never a cut-off one (POSIX: write, fsync, rename,
+ * fsync the folder; Windows: MoveFileEx with WRITE_THROUGH). */
 static void wfile_close(void *d)
 {
     wfile *w = (wfile *)d;
-    if (w->f)
-        fclose(w->f);
+    if (w->f) {
+        if (w->atomic) {
+            char tmp[1210];
+            snprintf(tmp, sizeof tmp, "%s.tmp", w->path);
+            fflush(w->f);
+#if defined(_WIN32)
+            _commit(_fileno(w->f));
+            fclose(w->f);
+            if (!MoveFileExA(tmp, w->path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                wr_log("file: cannot replace %s", w->path);
+#else
+            fsync(fileno(w->f));
+            fclose(w->f);
+            if (rename(tmp, w->path) != 0)
+                wr_log("file: cannot replace %s", w->path);
+            else {
+                char dir[1200];
+                snprintf(dir, sizeof dir, "%s", w->path);
+                char *sl = strrchr(dir, '/');
+                if (sl) {
+                    *sl = 0;
+                    int fd = open(dir, O_RDONLY);
+                    if (fd >= 0) {
+                        fsync(fd);
+                        close(fd);
+                    }
+                }
+            }
+#endif
+        } else
+            fclose(w->f);
+    }
     free(w);
 }
 
@@ -832,14 +869,19 @@ WR_HANDLER(k_CreateFileA)
         }
         host = wrp;
     }
-    FILE *f = fopen(host, mode);
-    WR_TRACE("CreateFileA(%s, 0x%X, %u) -> %s %s", name, access, disp, host, f ? "ok" : "FAILED");
+    int atomic = mode[0] == 'w' && host == wrp;   /* replacing a file in the writable folders */
+    char tmp[1210];
+    snprintf(tmp, sizeof tmp, "%s.tmp", host);
+    FILE *f = fopen(atomic ? tmp : host, mode);
+    WR_TRACE("CreateFileA(%s, 0x%X, %u) -> %s%s %s", name, access, disp, host, atomic ? " (via .tmp)" : "",
+             f ? "ok" : "FAILED");
     if (!f) {
         WR_SETERR(ERROR_PATH_NOT_FOUND);
         WR_RET(W32_INVALID_HANDLE, 7);
     }
     wfile *w = (wfile *)calloc(1, sizeof *w);
     w->f = f;
+    w->atomic = atomic;
     snprintf(w->path, sizeof w->path, "%s", host);
     WR_SETERR(exists && (disp == 2 || disp == 4) ? ERROR_ALREADY_EXISTS : 0);
     WR_RET(wr_handle_new(WR_H_FILE, w, wfile_close), 7);
