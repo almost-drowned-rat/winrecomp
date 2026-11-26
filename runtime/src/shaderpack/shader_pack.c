@@ -48,25 +48,29 @@ static int exists(const char *p)
     return SDL_GetPathInfo(p, &pi);
 }
 
-/* every folder up to and including path */
+/* every folder up to and including path - only the missing ones, from the end: the parents above the port's own
+ * folder may not even be visible (Android: /storage/emulated cannot be looked at from an app) */
 static int mkdirs(const char *path)
 {
-    char *p = SDL_strdup(path), *c;
-    int ok = 1;
+    char *p, *c;
+    int ok;
+    if (is_dir(path))
+        return 1;
+    p = SDL_strdup(path);
     if (!p)
         return 0;
-    for (c = p + 1; *c && ok; c++)
-        if (*c == '/' || *c == '\\') {
-            char keep = *c;
-            *c = 0;
-            if (c[-1] != ':' && !is_dir(p))       /* not "C:" */
-                ok = SDL_CreateDirectory(p);
-            *c = keep;
-        }
-    if (ok && !is_dir(p))
-        ok = SDL_CreateDirectory(p);
+    c = p + SDL_strlen(p);
+    while (c > p && (c[-1] == '/' || c[-1] == '\\'))   /* a trailing separator */
+        *--c = 0;
+    while (c > p && c[-1] != '/' && c[-1] != '\\')
+        c--;
+    ok = 1;
+    if (c > p + 1 && c[-2] != ':') {                   /* the parent first (not "/" and not "C:") */
+        c[-1] = 0;
+        ok = mkdirs(p);
+    }
     SDL_free(p);
-    return ok;
+    return ok && (SDL_CreateDirectory(path) || is_dir(path));
 }
 
 static int write_file(const char *path, const void *data, size_t len)
