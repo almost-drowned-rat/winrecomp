@@ -476,6 +476,23 @@ WR_HANDLER(ail_serve)
 /* ---- streams ------------------------------------------------------------------------------- */
 
 typedef struct mstream { uint32_t va; int voice; int stereo_adpcm; } mstream;
+
+/* Switch: report half the rate for stereo IMA ADPCM streams (assumed MSS 5
+ * behaviour; GTA 2 doubles it again for its stereo radio). Default on; the
+ * port's setting or WR_MILES_HALF_STEREO_RATE=0/1 overrides. */
+static int g_half_stereo_adpcm = -1;
+
+void wr_miles_set_half_stereo_rate(int on) { g_half_stereo_adpcm = on ? 1 : 0; }
+
+static int half_stereo_rate(void)
+{
+    static int env = -2;   /* -2 unread, -1 unset */
+    if (env == -2) {
+        const char *e = getenv("WR_MILES_HALF_STEREO_RATE");
+        env = e && *e ? *e != '0' : -1;
+    }
+    return env >= 0 ? env : g_half_stereo_adpcm != 0;   /* default (unset -1) = on */
+}
 static mstream g_st[8];
 
 static mstream *stfind(uint32_t va)
@@ -563,7 +580,7 @@ WR_HANDLER(ail_stream_playback_rate)
     if (!s)
         WR_RET(22050, 1);
     uint32_t r = wr_voice_get_rate(s->voice);
-    WR_RET(s->stereo_adpcm ? r / 2 : r, 1);
+    WR_RET(s->stereo_adpcm && half_stereo_rate() ? r / 2 : r, 1);
 }
 
 STUB(ail_set_stream_playback_rate, 2, (stfind(WR_ARG(0)) ? (wr_voice_rate(stfind(WR_ARG(0))->voice, WR_ARG(1)), 0) : 0))

@@ -178,6 +178,10 @@ typedef int (*wr_coop_step_fn)(X86Ctx *ctx, uint32_t param);
 typedef wr_coop_step_fn (*wr_thread_hook_fn)(X86Ctx *ctx, uint32_t start, uint32_t param);
 void wr_set_thread_hook(wr_thread_hook_fn hook);
 void wr_coop_run(X86Ctx *ctx);
+
+/* Miles (libs/miles.c): report half the rate of stereo IMA ADPCM streams
+ * (default on; WR_MILES_HALF_STEREO_RATE=0/1 wins) */
+void wr_miles_set_half_stereo_rate(int on);
 #define WR_CALL_RET_VA 0xFEFFFFF0u
 
 /* ---- handler helpers ------------------------------------------------------ */
