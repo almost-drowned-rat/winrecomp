@@ -34,6 +34,8 @@ void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up));
 void wr_pad_dik(uint8_t st[256]);
 /* left stick of the first pad, -1..1 (x right, y down); 0 = no pad */
 int  wr_pad_stick(float *x, float *y);
+/* d-pad of the first pad as a direction (-1/0/1, y down); 1 while pressed */
+int  wr_pad_dpad(int *x, int *y);
 int  wr_pad_count(void);
 
 /* Scripted test input (WR_INPUT). */

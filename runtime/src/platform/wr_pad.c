@@ -150,3 +150,18 @@ int wr_pad_stick(float *x, float *y)
         }
     return 0;
 }
+
+/* The d-pad of the first connected pad as a direction, -1/0/1 each (x right,
+ * y down); 0 when there is none or nothing is pressed. */
+int wr_pad_dpad(int *x, int *y)
+{
+    *x = *y = 0;
+    for (int k = 0; k < 4; k++)
+        if (g_pads[k]) {
+            SDL_Gamepad *p = g_pads[k];
+            *x = SDL_GetGamepadButton(p, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) - SDL_GetGamepadButton(p, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+            *y = SDL_GetGamepadButton(p, SDL_GAMEPAD_BUTTON_DPAD_DOWN) - SDL_GetGamepadButton(p, SDL_GAMEPAD_BUTTON_DPAD_UP);
+            return *x || *y;
+        }
+    return 0;
+}
