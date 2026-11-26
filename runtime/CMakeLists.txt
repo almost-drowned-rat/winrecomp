@@ -11,6 +11,7 @@ add_library(winrecomp_rt STATIC
     src/wr_heap.c
     src/wr_pe.c
     src/wr_paths.c
+    src/wr_settings.c
     src/platform/wr_keys.c
     src/platform/wr_input_script.c
     src/platform/wr_pad.c
