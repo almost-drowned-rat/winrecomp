@@ -10,6 +10,8 @@
 #include "../platform/wr_platform.h"
 
 #include <SDL3/SDL.h>
+
+void wr_vk_surface_background(int bg);   /* vk/wr_vk.c */
 #include <stdlib.h>
 
 #define WM_CREATE        0x0001
@@ -289,6 +291,15 @@ void w32_pump_events(X86Ctx *ctx)
             post(hwnd, msg, vk, key_lparam(dik, up, e.key.repeat), chr);
             break;
         }
+        case SDL_EVENT_DID_ENTER_BACKGROUND:   /* Android: minimised / screen off - the window is destroyed */
+        case SDL_EVENT_WILL_ENTER_BACKGROUND:
+            wr_log("app: background");
+            wr_vk_surface_background(1);
+            break;
+        case SDL_EVENT_DID_ENTER_FOREGROUND:   /* back: a new window, the swap chain gets a new surface */
+            wr_log("app: foreground");
+            wr_vk_surface_background(0);
+            break;
         case SDL_EVENT_MOUSE_WHEEL:
             g_wr_mouse_wheel += (int)e.wheel.y;   /* ports read and clear it */
             break;

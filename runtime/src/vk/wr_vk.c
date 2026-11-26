@@ -201,6 +201,40 @@ static int recreate_swapchain(void)
     return create_swapchain();
 }
 
+/* The window's surface was replaced (Android: the app went to the background - minimised, screen off - and the
+ * system destroyed its window; back in the foreground there is a new one): a new VkSurface and swap chain, done at
+ * the next frame start, never inside a frame. Until then (in the background) nothing is drawn. */
+static SDL_AtomicInt g_surface_state;   /* 0 normal, 1 in the background, 2 back: renew the surface */
+
+void wr_vk_surface_background(int bg)
+{
+    SDL_SetAtomicInt(&g_surface_state, bg ? 1 : 2);
+}
+
+static int renew_surface(void)
+{
+    vkDeviceWaitIdle(g_vk.dev);
+    destroy_swapchain_parts();
+    if (g_vk.swapchain)
+        vkDestroySwapchainKHR(g_vk.dev, g_vk.swapchain, NULL);
+    g_vk.swapchain = VK_NULL_HANDLE;
+    if (g_vk.surface)
+        vkDestroySurfaceKHR(g_vk.instance, g_vk.surface, NULL);
+    g_vk.surface = VK_NULL_HANDLE;
+    if (!SDL_Vulkan_CreateSurface(g_win, g_vk.instance, NULL, &g_vk.surface)) {
+        wr_log("vulkan: new surface failed: %s", SDL_GetError());
+        g_vk.surface = VK_NULL_HANDLE;
+        return 0;
+    }
+    VkBool32 ok = VK_FALSE;
+    vkGetPhysicalDeviceSurfaceSupportKHR(g_vk.phys, g_vk.qfamily, g_vk.surface, &ok);
+    if (!ok)
+        wr_log("vulkan: the new surface reports no present support on queue family %u", g_vk.qfamily);
+    wr_log("vulkan: new window surface (back from the background)");
+    g_vk.need_recreate = 1;
+    return 1;
+}
+
 /* ---- init ---------------------------------------------------------------------------------- */
 
 /* colour (+ depth) pass; colour cleared or kept; the colour ends in `final` */
@@ -717,6 +751,16 @@ VkCommandBuffer wr_vk_frame_begin(void)
 {
     if (!g_vk.ready || g_vk.in_frame)
         return NULL;
+    int ss = SDL_GetAtomicInt(&g_surface_state);
+    if (ss == 1)
+        return NULL;   /* in the background: no window to draw into */
+    if (ss == 2) {
+        if (!renew_surface())
+            return NULL;   /* tried again at the next frame */
+        SDL_SetAtomicInt(&g_surface_state, 0);
+    }
+    if (!g_vk.surface)
+        return NULL;
     if (g_vk.need_recreate && !recreate_swapchain())
         return NULL;
     wr_vk_frame *f = &g_vk.frames[g_vk.frame];
@@ -724,6 +768,10 @@ VkCommandBuffer wr_vk_frame_begin(void)
     free_dead(f);
 
     VkResult r = vkAcquireNextImageKHR(g_vk.dev, g_vk.swapchain, UINT64_MAX, f->acquired, VK_NULL_HANDLE, &g_vk.image);
+    if (r == VK_ERROR_SURFACE_LOST_KHR) {   /* the window went away under us: a new surface next frame */
+        SDL_SetAtomicInt(&g_surface_state, 2);
+        return NULL;
+    }
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
         g_vk.need_recreate = 1;
         return NULL;
@@ -841,7 +889,9 @@ void wr_vk_frame_end(void)
 #if defined(__ANDROID__)
     /* identity transform on a panel that is natively portrait (Odin 2): every present says SUBOPTIMAL - it stays
      * so after a rebuild, which would then happen every frame; only OUT_OF_DATE needs a new swapchain */
-    if (r == VK_ERROR_OUT_OF_DATE_KHR)
+    if (r == VK_ERROR_SURFACE_LOST_KHR)
+        SDL_SetAtomicInt(&g_surface_state, 2);
+    else if (r == VK_ERROR_OUT_OF_DATE_KHR)
 #else
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
 #endif

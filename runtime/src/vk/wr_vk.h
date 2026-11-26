@@ -143,6 +143,8 @@ extern wr_vk g_vk;
 int  wr_vk_init(struct SDL_Window *window, int vsync);
 void wr_vk_shutdown(void);
 void wr_vk_set_vsync(int on);
+/* Android: the app went to the background (1) / came back (0) - the swap chain gets a new window surface */
+void wr_vk_surface_background(int bg);
 
 /* Offscreen render target: RGBA8 colour (sampled by the present pass) and a
  * depth buffer. Colour persists between passes; depth is cleared at each
