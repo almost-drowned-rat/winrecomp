@@ -11,7 +11,15 @@ Copyright (c) 2026 sp00nz; see LICENSE. winrecomp adds a Win32 PE front end
 Third-party code taken from xboxrecomp option-c (MIT) with its notices:
 
   runtime/src/overlay/status_overlay.{c,h}, runtime/src/post/shader_pass.{c,h},
-  runtime/src/shaderpack/: option-c code, MIT (see LICENSE).
+  runtime/src/shaderpack/, runtime/src/media/ (custom soundtracks: scan,
+  playlist, decode; option-c 9c464f7): option-c code, MIT (see LICENSE).
+
+  runtime/src/media/third_party/, vendored unchanged from option-c:
+    dr_mp3.h  v0.7.4, dr_flac.h v0.13.4, dr_wav.h v0.14.6
+              mackron/dr_libs, commit d422edf; (c) David Reid; public
+              domain (Unlicense) or MIT No Attribution, at your choice
+    stb_vorbis.c  nothings/stb, commit 003501f; (c) Sean Barrett; MIT or
+              public domain, at your choice
 
   stb_truetype (runtime/src/overlay/third_party/stb/stb_truetype.h), nothings/stb,
   v1.26, sha256 ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab;

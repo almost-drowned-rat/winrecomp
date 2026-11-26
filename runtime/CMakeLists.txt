@@ -27,6 +27,9 @@ add_library(winrecomp_rt STATIC
     src/vk/wr_overlay.c
     src/post/shader_pass.c
     src/overlay/status_overlay.c
+    src/media/media_decode.c
+    src/media/media_scan.c
+    src/media/media_playlist.c
 )
 
 # Status overlays (overlay/status_overlay.c, from option-c): the bundled font
