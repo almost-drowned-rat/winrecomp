@@ -54,6 +54,8 @@ void shader_pack_free(ShaderIndex *idx);
  * SHADER_PACK_WORKING until it is done. shader_pack_index() is NULL before. */
 enum { SHADER_PACK_IDLE, SHADER_PACK_WORKING, SHADER_PACK_READY, SHADER_PACK_FAILED };
 void shader_pack_start(const char *media_shaders, const char *data_shaders);
+/* List the bezel / border folders too (call before shader_pack_start). */
+void shader_pack_show_bezels(int on);
 int shader_pack_state(void);
 const ShaderIndex *shader_pack_index(void);
 

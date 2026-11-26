@@ -1,5 +1,10 @@
 /* shader_pack.c -- see shader_pack.h. Written for this toolkit. */
 #include "shader_pack.h"
+
+/* bezel / border folders: hidden by default (option-c), listed when a port
+ * asks (GTA 2: as the N64 recomps; the player picks them if he wants) */
+static int s_show_bezels;
+void shader_pack_show_bezels(int on) { s_show_bezels = on != 0; }
 #include "zip_read.h"
 
 #include <stdio.h>
@@ -454,7 +459,7 @@ static void walk(Walk *w, const char *dir, const char *rel, int depth)
         r = cat3(rel, "/", f);
         if (p && r) {
             if (is_dir(p)) {
-                if (!SDL_strcasecmp(f, "bezel") || !SDL_strcasecmp(f, "border"))
+                if (!s_show_bezels && (!SDL_strcasecmp(f, "bezel") || !SDL_strcasecmp(f, "border")))
                     w->hidden++;
                 else if (depth < 24)
                     walk(w, p, r, depth + 1);
@@ -692,7 +697,7 @@ int shader_pack_sync(const char *media, const char *data, ShaderIndex *x)
         }
         free(p);
     }
-    ifile = join(data, "index.txt");
+    ifile = join(data, s_show_bezels ? "index_all.txt" : "index.txt");   /* one cache per listing */
     if (ifile && index_read(ifile, sig, media, data, x)) {
         fprintf(stderr, SP_LOG "%d packs, %d presets (index unchanged) in %.0f ms\n", x->packs, x->n,
                 (SDL_GetTicksNS() - t0) / 1e6);
