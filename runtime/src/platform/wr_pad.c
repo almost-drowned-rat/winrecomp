@@ -16,6 +16,7 @@
 #include <string.h>
 
 static SDL_Gamepad *g_pads[4];
+static int g_last_pad = -1;   /* the pad pressed last */
 /* The keyboard as a controller (option-c's layout; a port turns it on):
  * WASD left stick, arrows d-pad, Enter START, Backspace BACK, I/J/K/L =
  * Y/X/A/B, U/O = LB/RB, Z/P = LT/RT. Those keys then reach the game only
@@ -166,6 +167,8 @@ void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up))
                 now[dik] = 0x80;
             if (g_log && !(g_ctl_prev[k] >> c & 1))
                 wr_log("pad %d: control %d -> DIK 0x%02X", k, c, dik);
+            if (!(g_ctl_prev[k] >> c & 1))
+                g_last_pad = k;   /* a new press: this pad is the one in the player's hands (rumble) */
             ctl_now[k] |= 1ull << c;
         }
     }
@@ -338,24 +341,44 @@ static SDL_Haptic *device_haptic(void)
 /* Rumble on every open controller: low / high motor 0..1, for ms milliseconds
  * (a newer call replaces a running one, as SDL does). A pad without motors (the Odin's built-in one) uses the
  * device vibrator instead. */
+static int pad_has_motors(SDL_Gamepad *p)
+{
+    return p && SDL_GetBooleanProperty(SDL_GetGamepadProperties(p), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
+}
+
+/* a handheld's own pad: no motors and built into the device (Android: the device vibrator stands in for it).
+ * A docked handheld played with an external pad never shakes itself (maintainer 2026-11-26). */
+static int pad_built_in(SDL_Gamepad *p)
+{
+#if defined(__ANDROID__)
+    return p && !pad_has_motors(p) && SDL_GetGamepadConnectionState(p) != SDL_JOYSTICK_CONNECTION_WIRELESS;
+#else
+    (void)p;
+    return 0;
+#endif
+}
+
 void wr_pad_rumble(float low, float high, uint32_t ms)
 {
-    int any = 0;
-    for (int k = 0; k < 4; k++)
-        if (g_pads[k] && SDL_GetBooleanProperty(SDL_GetGamepadProperties(g_pads[k]), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false))
-            any = 1;
-    if (!any) {
-        SDL_Haptic *h = device_haptic();
-        float st = low > high ? low : high;
-        if (h && st > 0)
-            SDL_PlayHapticRumble(h, st > 1 ? 1.0f : st, ms);
+    /* the pad in the player's hands: the one pressed last (or the only one) */
+    int k = g_last_pad;
+    if (k < 0 || !g_pads[k])
+        for (k = 0; k < 4 && !g_pads[k]; k++) {}
+    if (k >= 4)
+        return;
+    if (!pad_has_motors(g_pads[k])) {
+        if (pad_built_in(g_pads[k])) {
+            SDL_Haptic *h = device_haptic();
+            float st = low > high ? low : high;
+            if (h && st > 0)
+                SDL_PlayHapticRumble(h, st > 1 ? 1.0f : st, ms);
+        }
         return;
     }
     if (low < 0) low = 0;
     if (low > 1) low = 1;
     if (high < 0) high = 0;
     if (high > 1) high = 1;
-    for (int k = 0; k < 4; k++)
-        if (g_pads[k] && !SDL_RumbleGamepad(g_pads[k], (Uint16)(low * 65535.0f), (Uint16)(high * 65535.0f), ms))
-            WR_ONCE("pad: rumble failed: %s", SDL_GetError());
+    if (!SDL_RumbleGamepad(g_pads[k], (Uint16)(low * 65535.0f), (Uint16)(high * 65535.0f), ms))
+        WR_ONCE("pad: rumble failed: %s", SDL_GetError());
 }
