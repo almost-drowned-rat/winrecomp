@@ -467,7 +467,16 @@ void wr_exit(uint32_t code)
     wr_log("heap: arena used up to 0x%08X (%u MB)", wr_heap_top(), (wr_heap_top() - WR_HEAP_LO) >> 20);
     wr_log("process exit, code %u", code);
     fflush(stderr);
+#if defined(_WIN32)
     exit((int)code);
+#else
+    /* not exit(): its destructors run while the audio / timer threads still lock their mutexes (Android's
+     * FORTIFY aborts on that: "pthread_mutex_lock called on a destroyed mutex" -> a crash report after every
+     * QUIT, Odin 2026-11-26). Everything the player keeps is on disk already (saves and settings are written at
+     * once, atomically); the logs are flushed here. */
+    fflush(NULL);
+    _exit((int)code);
+#endif
 }
 
 /* RESTART NOW (a setting that only applies at start, e.g. the language):
