@@ -57,8 +57,11 @@ void wr_paths_init(const char *root)
     snprintf(g_wr_paths.saves, sizeof g_wr_paths.saves, "%s/saves", root);
     snprintf(g_wr_paths.data, sizeof g_wr_paths.data, "%s/data", root);
     snprintf(g_wr_paths.media, sizeof g_wr_paths.media, "%s/media", root);
+    /* the whole layout exists from the first start, so the player sees where his files go */
+    mkdirs(g_wr_paths.game);
     mkdirs(g_wr_paths.saves);
     mkdirs(g_wr_paths.data);
+    mkdirs(g_wr_paths.media);
 #if !defined(_WIN32) && !defined(__ANDROID__)
     /* Nothing outside the folder (as option-c): the GPU drivers' shader
      * caches go to data/shadercache (Mesa incl. RADV's built-in shaders,

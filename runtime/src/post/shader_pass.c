@@ -64,6 +64,11 @@ static int s_lib = -1;                            /* -1 not tried, 0 unusable, 1
 
 static int lib_path(char *out, size_t n)
 {
+#if defined(__ANDROID__)
+    /* Android: the APK's own native library (extracted to its lib folder); dlopen finds it by name in the app's
+     * namespace - never a file the player put somewhere */
+    return (size_t)snprintf(out, n, "%s", SP_LIB_NAME) < n;
+#endif
     const char *base = SDL_GetBasePath();         /* the exe's folder, with the separator; SDL owns it */
     if (!base)
         return 0;
@@ -209,8 +214,19 @@ int sp_status(void)
 int wr_post_shader_library_present(void)
 {
     char path[1024];
+#if defined(__ANDROID__)
+    static int have = -1;   /* the APK carries it or not: asked once */
+    if (have < 0) {
+        SDL_SharedObject *so = lib_path(path, sizeof path) ? SDL_LoadObject(path) : NULL;
+        have = so != NULL;
+        if (so)
+            SDL_UnloadObject(so);
+    }
+    return have;
+#else
     SDL_PathInfo pi;
     return lib_path(path, sizeof path) && SDL_GetPathInfo(path, &pi) && pi.type == SDL_PATHTYPE_FILE;
+#endif
 }
 
 /* ── The build (worker thread) ────────────────────────────────────── */
