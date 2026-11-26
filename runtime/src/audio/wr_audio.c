@@ -53,6 +53,66 @@ static int g_paused;
 static void lock(void) { if (g_mx) SDL_LockMutex(g_mx); }
 static void unlock(void) { if (g_mx) SDL_UnlockMutex(g_mx); }
 
+/* ---- the port's music (custom soundtracks): 44100 Hz stereo s16 pulled in the mixer ---- */
+static wr_music_fn g_music;
+static float g_music_vol = 1.0f;
+static int16_t g_mbuf[2048 * 2];
+static long g_mbuf_n, g_mbuf_i;      /* frames in the buffer, the next one */
+static double g_mfrac;
+
+void wr_audio_music(wr_music_fn fn)
+{
+    lock();
+    g_music = fn;
+    g_mbuf_n = g_mbuf_i = 0;
+    g_mfrac = 0;
+    unlock();
+}
+
+void wr_audio_music_volume(float vol)
+{
+    g_music_vol = vol < 0 ? 0 : vol > 1 ? 1 : vol;
+}
+
+/* one source frame (advances), 0 when the port has nothing */
+static int music_frame(float *l, float *r)
+{
+    if (g_mbuf_i >= g_mbuf_n) {
+        g_mbuf_n = g_music ? g_music(g_mbuf, 2048) : 0;
+        g_mbuf_i = 0;
+        if (g_mbuf_n <= 0) {
+            g_mbuf_n = 0;
+            return 0;
+        }
+    }
+    *l = g_mbuf[2 * g_mbuf_i] * (1.0f / 32768.0f);
+    *r = g_mbuf[2 * g_mbuf_i + 1] * (1.0f / 32768.0f);
+    g_mbuf_i++;
+    return 1;
+}
+
+static void mix_music(float *out, int frames)
+{
+    static float pl, pr, cl, cr;   /* the two source frames around the output point */
+    float g = g_music_vol * g_master;
+    for (int n = 0; n < frames; n++) {
+        g_mfrac += 44100.0 / OUT_RATE;
+        while (g_mfrac >= 1.0) {
+            g_mfrac -= 1.0;
+            pl = cl;
+            pr = cr;
+            if (!music_frame(&cl, &cr)) {
+                cl = cr = 0;
+                if (!g_music)
+                    return;
+            }
+        }
+        float t = (float)g_mfrac;
+        out[2 * n] += (pl + (cl - pl) * t) * g;
+        out[2 * n + 1] += (pr + (cr - pr) * t) * g;
+    }
+}
+
 static int valid(int v) { return v >= 0 && v < MAX_VOICES && g_v[v].state != WR_VOICE_FREE; }
 
 /* ---- IMA ADPCM ------------------------------------------------------------------- */
@@ -256,6 +316,8 @@ static void mix(float *out, int frames)
             v->pos += step;
         }
     }
+    if (g_music)
+        mix_music(out, frames);
     for (int n = 0; n < 2 * frames; n++) {
         float s = out[n];
         out[n] = s > 1.0f ? 1.0f : s < -1.0f ? -1.0f : s;

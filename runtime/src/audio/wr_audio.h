@@ -22,6 +22,11 @@ int  wr_audio_init(void);                 /* 1 = device open (0: silent, still u
 void wr_audio_shutdown(void);
 void wr_audio_pause(int paused);          /* focus loss etc. */
 void wr_audio_master(float vol);          /* 0..1 */
+/* the port's music: fn fills up to `frames` 44100 Hz stereo s16 frames and returns how many (0 = silence
+ * for now); called in the mixer thread under the audio lock. NULL = off. */
+typedef long (*wr_music_fn)(int16_t *out, long frames);
+void wr_audio_music(wr_music_fn fn);
+void wr_audio_music_volume(float vol);   /* 0..1 */
 
 int  wr_voice_new(void);                  /* -1 if none left */
 void wr_voice_free(int v);

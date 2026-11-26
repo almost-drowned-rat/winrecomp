@@ -27,6 +27,8 @@ MediaDecoder *media_decoder_open(const char *path);
  * only at the end of the file, 0 after it, -1 on a decode error. */
 long     media_decoder_read(MediaDecoder *d, int16_t *out, long frames);
 int      media_decoder_rewind(MediaDecoder *d);
+/* To ms into the file (MP3 decodes up to it: not on the audio thread). */
+int      media_decoder_seek_ms(MediaDecoder *d, uint32_t ms);
 /* Length in ms at the output rate, 0 when the file does not say (an MP3
  * without a Xing/Info header). */
 uint32_t media_decoder_length_ms(const MediaDecoder *d);

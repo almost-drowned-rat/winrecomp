@@ -267,6 +267,25 @@ int media_decoder_rewind(MediaDecoder *d)
     return ok;
 }
 
+/* To ms into the song (winrecomp: the GTA 2 MIXTAPE station keeps running while
+ * not listened to). MP3 without a seek table decodes up to the point: call it
+ * off the audio thread. */
+int media_decoder_seek_ms(MediaDecoder *d, uint32_t ms)
+{
+    uint64_t fr = (uint64_t)ms * d->rate / 1000u;
+    int ok;
+    switch (d->kind) {
+    case K_MP3:  ok = drmp3_seek_to_pcm_frame(&d->mp3, fr); break;
+    case K_FLAC: ok = drflac_seek_to_pcm_frame(d->flac, fr); break;
+    case K_WAV:  ok = drwav_seek_to_pcm_frame(&d->wav, fr); break;
+    default:     ok = stb_vorbis_seek(d->vorbis, (unsigned)fr); break;
+    }
+    d->nbuf = d->at = 0;
+    d->frac = 0;
+    d->eof = 0;
+    return ok;
+}
+
 uint32_t media_decoder_length_ms(const MediaDecoder *d)
 {
     return d->frames ? (uint32_t)(d->frames * 1000u / d->rate) : 0;
