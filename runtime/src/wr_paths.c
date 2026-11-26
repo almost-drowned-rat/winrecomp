@@ -59,6 +59,19 @@ void wr_paths_init(const char *root)
     snprintf(g_wr_paths.media, sizeof g_wr_paths.media, "%s/media", root);
     mkdirs(g_wr_paths.saves);
     mkdirs(g_wr_paths.data);
+#if !defined(_WIN32) && !defined(__ANDROID__)
+    /* Nothing outside the folder (as option-c): the GPU drivers' shader
+     * caches go to data/shadercache (Mesa incl. RADV's built-in shaders,
+     * NVIDIA). A value the player set himself wins. */
+    {
+        char cache[1100];
+        snprintf(cache, sizeof cache, "%s/shadercache", g_wr_paths.data);
+        mkdirs(cache);
+        setenv("MESA_SHADER_CACHE_DIR", cache, 0);
+        setenv("__GL_SHADER_DISK_CACHE_PATH", cache, 0);
+        setenv("__GL_SHADER_DISK_CACHE_SKIP_CLEANUP", "1", 0);
+    }
+#endif
     snprintf(g_wr_cwd, sizeof g_wr_cwd, "%s", g_wr_vroot);
 }
 
