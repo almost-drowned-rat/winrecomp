@@ -82,6 +82,9 @@ static uint8_t g_kb_prev[256];
 static uint32_t g_kb_seq;
 
 typedef struct kbev { uint8_t ofs, down; uint32_t t; } kbev;
+int g_wr_input_captured;   /* a port menu reads the keys (wr.h) */
+uint8_t g_wr_key_hidden[256];   /* keys the port keeps from the game (wr.h) */
+
 static kbev g_kb_buf[256];
 static int g_kb_n, g_kb_bufsize = 0;
 
@@ -91,6 +94,31 @@ static void kb_poll(void)
         SDL_PumpEvents();
     uint8_t cur[256];
     wr_keys_dik_state(cur);
+    /* A port menu has the input (wr_input_capture): the game sees no key.
+     * Afterwards keys still held stay hidden until they are released. */
+    static uint8_t hold_back[256];
+    static int was_captured;
+    for (int i = 0; i < 256; i++)
+        if (g_wr_key_hidden[i])
+            cur[i] = 0;
+    if (g_wr_input_captured) {
+        memset(cur, 0, sizeof cur);
+        was_captured = 1;
+    } else {
+        if (was_captured) {
+            uint8_t now[256];
+            wr_keys_dik_state(now);
+            for (int i = 0; i < 256; i++)
+                hold_back[i] = now[i] & 0x80;
+            was_captured = 0;
+        }
+        for (int i = 0; i < 256; i++) {
+            if (hold_back[i] && !(cur[i] & 0x80))
+                hold_back[i] = 0;
+            if (hold_back[i])
+                cur[i] = 0;
+        }
+    }
     if (g_kb_bufsize) {
         for (int i = 0; i < 256; i++)
             if ((cur[i] ^ g_kb_prev[i]) & 0x80) {

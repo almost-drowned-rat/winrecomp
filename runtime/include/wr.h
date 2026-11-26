@@ -189,6 +189,12 @@ void wr_miles_set_half_stereo_rate(int on);
  * data/captures/<YYYYMMDD-HHMMSS>-frame<N>/ (the option-p layout; made by
  * wr_capture_dir) and clears the flag. */
 extern int g_wr_screenshot_request;
+/* 1 while a port menu over the game reads the keyboard / pads itself
+ * (wr_keys_dik_state): DirectInput gives the game no keys. */
+extern int g_wr_input_captured;
+/* DIK codes the port keeps from the game (it reads them itself), e.g. Esc
+ * opening the port's pause menu instead of the game's prompt. */
+extern uint8_t g_wr_key_hidden[256];
 int  wr_capture_dir(uint64_t frame, char *out, size_t cap);
 void wr_restart(void);   /* start the game again (RESTART NOW); never returns */
 
