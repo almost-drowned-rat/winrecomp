@@ -18,9 +18,9 @@
 #include <string.h>
 
 static int g_mask;                 /* WR_PERF_* */
-static float g_top_frac;           /* the panel's top as a share of the height (0 = the margin) */
+static int g_pos_x = -1, g_pos_y = -1;   /* the panel's top left in window pixels (-1: the corner) */
 
-void wr_overlay_set_top(float frac) { g_top_frac = frac; }
+void wr_overlay_set_pos(int x, int y) { g_pos_x = x; g_pos_y = y; }
 static double g_tick_hz = 30.0;    /* the game's own logic rate */
 static uint64_t g_ticks;
 
@@ -150,7 +150,7 @@ void wr_overlay_draw(VkCommandBuffer cmd)
         return;
     int hgt = (int)g_vk.extent.height;
     int margin = (hgt / 48 > 14 ? hgt / 48 : 14) / 2;
-    int top = g_top_frac > 0 ? (int)(g_top_frac * (float)hgt) : margin;
-    wr_vk_blit_texture_part(cmd, g_tex, margin, top, g_panel.w, g_panel.h,
+    int left = g_pos_x >= 0 ? g_pos_x : margin, top = g_pos_y >= 0 ? g_pos_y : margin;
+    wr_vk_blit_texture_part(cmd, g_tex, left, top, g_panel.w, g_panel.h,
                             (float)g_panel.w / (float)g_tex_w, (float)g_panel.h / (float)g_tex_h);
 }
