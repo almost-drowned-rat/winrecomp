@@ -12,6 +12,11 @@
  * writes go to saves/. Lookup is case-insensitive on every host.
  */
 #include "wr.h"
+#if defined(_WIN32)
+#include <direct.h>
+#endif
+#include <stdlib.h>
+#include <time.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -202,4 +207,41 @@ int wr_path_resolve_write(const char *guest, char *host, size_t cap)
     }
     snprintf(host, cap, "%s/%s", hostdir, file);
     return 1;
+}
+
+/* <root>/screenshots/<game>_YYYY-MM-DD_HH-MM-SS[_n].png (created on demand);
+ * WR_SCREENSHOT_DIR overrides the folder. 1 on success. */
+int wr_screenshot_path(const char *game, char *out, size_t cap)
+{
+    char dir[1100];
+    const char *e = getenv("WR_SCREENSHOT_DIR");
+    if (e && *e)
+        snprintf(dir, sizeof dir, "%s", e);
+    else
+        snprintf(dir, sizeof dir, "%s/screenshots", g_wr_paths.root);
+#if defined(_WIN32)
+    _mkdir(dir);
+#else
+    mkdir(dir, 0755);
+#endif
+    time_t t = time(NULL);
+    struct tm tm;
+#if defined(_WIN32)
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char stamp[32];
+    strftime(stamp, sizeof stamp, "%Y-%m-%d_%H-%M-%S", &tm);
+    for (int n = 0; n < 100; n++) {
+        if (n)
+            snprintf(out, cap, "%s/%s_%s_%d.png", dir, game, stamp, n);
+        else
+            snprintf(out, cap, "%s/%s_%s.png", dir, game, stamp);
+        FILE *f = fopen(out, "rb");
+        if (!f)
+            return 1;
+        fclose(f);
+    }
+    return 0;
 }

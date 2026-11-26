@@ -214,8 +214,12 @@ static uint32_t key_lparam(uint8_t dik, int up, int repeat)
 
 extern volatile uint32_t wr_heartbeat;
 
+int g_wr_screenshot_request;
+
 static void script_key(uint8_t vk, uint8_t dik, int up)
 {
+    if (vk == 0x7B && !up)   /* F12 from a script or a pad: screenshot */
+        g_wr_screenshot_request = 1;
     wwin *mw = main_win();
     if (!mw)
         return;
@@ -262,6 +266,8 @@ void w32_pump_events(X86Ctx *ctx)
             break;
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP: {
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_F12 && !e.key.repeat)
+                g_wr_screenshot_request = 1;   /* F12: the port saves the game picture */
             uint8_t vk, dik;
             if (!hwnd || !wr_key_from_sdl((int)e.key.scancode, &vk, &dik))
                 break;

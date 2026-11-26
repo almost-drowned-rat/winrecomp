@@ -185,6 +185,10 @@ void wr_miles_set_half_stereo_rate(int on);
 
 /* The port's settings file saves/settings.ini (wr_settings.c): key=value,
  * unknown lines kept, atomic writes; <prefix>_<KEY> env overrides one run. */
+/* F12 was pressed: the port's renderer saves the game picture to
+ * <root>/screenshots/ and clears the flag (wr_screenshot_path names the file). */
+extern int g_wr_screenshot_request;
+int  wr_screenshot_path(const char *game, char *out, size_t cap);
 void wr_restart(void);   /* start the game again (RESTART NOW); never returns */
 
 void wr_settings_init(const char *env_prefix);       /* after wr_paths_init */
