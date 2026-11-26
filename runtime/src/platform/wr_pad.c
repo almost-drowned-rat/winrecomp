@@ -1,0 +1,124 @@
+/*
+ * winrecomp runtime - game controllers (SDL3 gamepads) as virtual keys.
+ *
+ * The port supplies a table pad control -> DirectInput key code (DIK), and
+ * may compute the code at run time (GTA 2 looks up the key the game's own
+ * control settings assign to an action). Pressed controls show up in
+ * DirectInput's keyboard state and as WM_KEYDOWN/WM_KEYUP edges, so menus
+ * and gameplay both see them like real keys.
+ */
+#include "wr_platform.h"
+#include "wr.h"
+
+#include <SDL3/SDL.h>
+#include <string.h>
+
+static SDL_Gamepad *g_pads[4];
+static wr_pad_map_fn g_map;
+static uint8_t g_down[256];        /* virtual DIK state from pads */
+static int g_inited;
+
+void wr_pad_set_map(wr_pad_map_fn fn) { g_map = fn; }
+
+static void open_pads(void)
+{
+    int n = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&n);
+    for (int i = 0; i < n && i < 4; i++) {
+        int have = 0;
+        for (int k = 0; k < 4; k++)
+            if (g_pads[k] && SDL_GetGamepadID(g_pads[k]) == ids[i])
+                have = 1;
+        if (have)
+            continue;
+        for (int k = 0; k < 4; k++)
+            if (!g_pads[k]) {
+                g_pads[k] = SDL_OpenGamepad(ids[i]);
+                if (g_pads[k])
+                    wr_log("pad %d: %s", k, SDL_GetGamepadName(g_pads[k]));
+                break;
+            }
+    }
+    SDL_free(ids);
+}
+
+void wr_pad_event(const void *ev)
+{
+    const SDL_Event *e = (const SDL_Event *)ev;
+    if (e->type == SDL_EVENT_GAMEPAD_ADDED) {
+        open_pads();
+    } else if (e->type == SDL_EVENT_GAMEPAD_REMOVED) {
+        for (int k = 0; k < 4; k++)
+            if (g_pads[k] && SDL_GetGamepadID(g_pads[k]) == e->gdevice.which) {
+                SDL_CloseGamepad(g_pads[k]);
+                g_pads[k] = NULL;
+                wr_log("pad %d: removed", k);
+            }
+    }
+}
+
+int wr_pad_count(void)
+{
+    int n = 0;
+    for (int k = 0; k < 4; k++)
+        n += g_pads[k] != NULL;
+    return n;
+}
+
+/* Poll every pad, map to virtual keys, report edges. */
+void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up))
+{
+    if (wr_platform_headless() || !g_map)
+        return;
+    if (!g_inited) {
+        g_inited = 1;
+        open_pads();
+    }
+    uint8_t now[256];
+    memset(now, 0, sizeof now);
+    for (int k = 0; k < 4; k++) {
+        SDL_Gamepad *p = g_pads[k];
+        if (!p)
+            continue;
+        for (int c = 0; c < WR_PAD_N; c++) {
+            if (c > WR_PAD_DPAD_RIGHT && c < WR_PAD_LEFT_STICK_LEFT)
+                continue;
+            int on;
+            switch (c) {
+            case WR_PAD_LEFT_STICK_LEFT:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTX) < -16000; break;
+            case WR_PAD_LEFT_STICK_RIGHT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTX) > 16000; break;
+            case WR_PAD_LEFT_STICK_UP:    on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTY) < -16000; break;
+            case WR_PAD_LEFT_STICK_DOWN:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTY) > 16000; break;
+            case WR_PAD_LT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000; break;
+            case WR_PAD_RT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000; break;
+            default: on = SDL_GetGamepadButton(p, (SDL_GamepadButton)c); break;
+            }
+            if (!on)
+                continue;
+            uint8_t dik = g_map(c);
+            if (dik)
+                now[dik] = 0x80;
+        }
+    }
+    for (int i = 1; i < 256; i++) {
+        if ((now[i] ^ g_down[i]) & 0x80) {
+            uint8_t vk = 0;
+            for (int sc = 0; sc < SDL_SCANCODE_COUNT; sc++) {
+                uint8_t v2, d2;
+                if (wr_key_from_sdl(sc, &v2, &d2) && d2 == i) {
+                    vk = v2;
+                    break;
+                }
+            }
+            if (post_key)
+                post_key(vk, (uint8_t)i, !(now[i] & 0x80));
+        }
+    }
+    memcpy(g_down, now, sizeof now);
+}
+
+void wr_pad_dik(uint8_t st[256])
+{
+    for (int i = 0; i < 256; i++)
+        st[i] |= g_down[i];
+}

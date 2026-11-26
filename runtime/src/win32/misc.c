@@ -109,6 +109,18 @@ void wr_reg_default(const char *key, const char *name, uint32_t type, const void
         val_set(v, type, data, len);
 }
 
+/* Port hook: read a DWORD value; 1 if present. */
+int wr_reg_get_dword(const char *key, const char *name, uint32_t *out)
+{
+    w32_registry_load();
+    rkey *k = key_find(key, 0);
+    rval *v = k ? val_find(k, name, 0) : NULL;
+    if (!v || v->type != 4 || v->len != 4)
+        return 0;
+    memcpy(out, v->data, 4);
+    return 1;
+}
+
 void wr_reg_default_dword(const char *key, const char *name, uint32_t value)
 {
     wr_reg_default(key, name, 4, &value, 4);
@@ -345,6 +357,7 @@ WR_HANDLER(a_RegSetValueExA)
     rval *v = val_find(key_find(kp, 1), name ? name : "", 1);
     val_set(v, type, len ? wr_ptr(data) : "", len);
     g_reg_dirty = 1;
+    w32_registry_save();   /* at once: survives crashes and app kills (atomic replace) */
     WR_TRACE("RegSetValueExA(%s, %s, type %u, %u bytes)", kp, name ? name : "", type, len);
     WR_RET(ERROR_SUCCESS, 6);
 }
@@ -362,6 +375,7 @@ WR_HANDLER(a_RegDeleteValueA)
             free(k->vals[i].data);
             k->vals[i] = k->vals[--k->nvals];
             g_reg_dirty = 1;
+            w32_registry_save();
             WR_RET(ERROR_SUCCESS, 2);
         }
     WR_RET(ERROR_FILE_NOT_FOUND, 2);

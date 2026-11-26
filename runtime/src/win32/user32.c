@@ -236,12 +236,14 @@ void w32_pump_events(X86Ctx *ctx)
     wr_heartbeat++;
     run_timers();
     wr_input_script_tick(script_key);
+    wr_pad_tick(script_key);
     if (g_headless || !g_sdl_up)
         return;
     wwin *mw = main_win();
     uint32_t hwnd = mw ? mw->hwnd : 0;
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
+        wr_pad_event(&e);
         switch (e.type) {
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:

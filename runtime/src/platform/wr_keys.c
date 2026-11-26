@@ -76,6 +76,7 @@ void wr_keys_dik_state(uint8_t out[256])
     for (int i = 0; i < 256; i++)
         out[i] = 0;
     wr_input_script_dik(out);
+    wr_pad_dik(out);
     const bool *st = SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(&n) : NULL;
     if (!st)
         return;
