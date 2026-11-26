@@ -209,3 +209,19 @@ const char *wr_pad_control_name(int c)
     };
     return c >= 0 && c < WR_PAD_N && n[c] ? n[c] : "-";
 }
+
+/* The right stick of the first connected pad, -1..1 each (x right, y down). */
+int wr_pad_stick_right(float *x, float *y)
+{
+    *x = *y = 0;
+    const char *f = getenv("WR_FAKE_RSTICK");
+    if (f && *f && sscanf(f, "%f,%f", x, y) == 2)
+        return 1;
+    for (int k = 0; k < 4; k++)
+        if (g_pads[k]) {
+            *x = SDL_GetGamepadAxis(g_pads[k], SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
+            *y = SDL_GetGamepadAxis(g_pads[k], SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
+            return 1;
+        }
+    return 0;
+}
