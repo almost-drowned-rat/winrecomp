@@ -280,7 +280,9 @@ static uint64_t host_ns(void)
     if (!freq.QuadPart)
         QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&c);
-    return (uint64_t)((double)c.QuadPart * 1e9 / (double)freq.QuadPart);
+    /* split into seconds + rest: a double of c * 1e9 loses ns precision after a few hours */
+    uint64_t f = (uint64_t)freq.QuadPart, n = (uint64_t)c.QuadPart;
+    return (n / f) * 1000000000ull + (n % f) * 1000000000ull / f;
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -296,6 +298,52 @@ uint64_t wr_time_ns(void)
         g_t0 = host_ns();
     return host_ns() - g_t0;
 }
+
+#if defined(_WIN32)
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+void wr_sleep_ns(uint64_t ns)
+{
+    /* one timer per thread (a waitable timer is waited on by the thread that set it) */
+    static __thread HANDLE timer;
+    static __thread int tried;
+    static int period_set;
+    if (!ns) {
+        Sleep(0);   /* as Sleep(0) / nanosleep(0): give up the rest of the slice */
+        return;
+    }
+    if (!tried) {
+        tried = 1;
+        timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    }
+    if (timer) {
+        LARGE_INTEGER due;
+        due.QuadPart = -(LONGLONG)((ns + 99) / 100);   /* relative, 100 ns units */
+        if (SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) {
+            WaitForSingleObject(timer, INFINITE);
+            return;
+        }
+    }
+    /* older Windows: Sleep at a 1 ms timer period (timeBeginPeriod loaded at run time, no
+     * winmm import); a sub-ms wait becomes Sleep(0), which only yields the slice */
+    if (!period_set) {
+        period_set = 1;
+        HMODULE w = LoadLibraryA("winmm.dll");
+        typedef UINT (WINAPI *tbp_fn)(UINT);
+        tbp_fn tbp = w ? (tbp_fn)(void *)GetProcAddress(w, "timeBeginPeriod") : NULL;
+        if (tbp)
+            tbp(1);
+    }
+    Sleep((DWORD)(ns / 1000000u));
+}
+#else
+void wr_sleep_ns(uint64_t ns)
+{
+    struct timespec ts = { (time_t)(ns / 1000000000ull), (long)(ns % 1000000000ull) };
+    nanosleep(&ts, NULL);
+}
+#endif
 
 /* GetTickCount: start the guest clock at a non-trivial value, as a machine
  * that has been on for a minute would. */
