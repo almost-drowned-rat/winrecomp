@@ -182,6 +182,8 @@ void wr_coop_run(X86Ctx *ctx);
 /* Miles (libs/miles.c): report half the rate of stereo IMA ADPCM streams
  * (default on; WR_MILES_HALF_STEREO_RATE=0/1 wins) */
 void wr_miles_set_half_stereo_rate(int on);
+/* every one-shot sample start: its data, length, volume (0..1) and rate (the port: rumble on explosions) */
+extern void (*g_wr_miles_start_hook)(uint32_t addr, uint32_t len, float vol, uint32_t rate);
 
 /* The port's settings file saves/settings.ini (wr_settings.c): key=value,
  * unknown lines kept, atomic writes; <prefix>_<KEY> env overrides one run. */

@@ -49,6 +49,7 @@ typedef struct msample {
 } msample;
 
 static msample g_s[MAX_SAMPLES];
+
 static uint32_t g_dig;          /* the one HDIGDRIVER */
 static uint32_t g_pref[64];
 
@@ -299,9 +300,14 @@ WR_HANDLER(ail_start_sample)
         wr_voice_rate(s->voice, s->rate);
         wr_voice_loop(s->voice, s->loops, s->loop_start, s->loop_end < 0 ? 0 : (uint32_t)s->loop_end);
         wr_voice_play(s->voice);
+        if (g_wr_miles_start_hook)
+            g_wr_miles_start_hook(s->addr, s->len, s->vol, s->rate);
     }
     WR_RET(0, 1);
 }
+
+/* the port sees every one-shot sample start (data, length, volume 0..1, rate): rumble and the like */
+void (*g_wr_miles_start_hook)(uint32_t addr, uint32_t len, float vol, uint32_t rate);
 
 STUB(ail_end_sample, 1, (sfind(WR_ARG(0)) ? (wr_voice_end(sfind(WR_ARG(0))->voice), 0) : 0))
 STUB(ail_stop_sample, 1, (sfind(WR_ARG(0)) ? (wr_voice_stop(sfind(WR_ARG(0))->voice), 0) : 0))
