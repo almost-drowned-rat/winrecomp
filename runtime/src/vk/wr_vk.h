@@ -196,6 +196,7 @@ void wr_vk_blit_texture_part(VkCommandBuffer cmd, wr_vk_texture *t, int x, int y
 /* PERFORMANCE overlay (wr_overlay.c): FPS / FRAME TIME / GAME SPEED */
 enum { WR_PERF_FPS = 1, WR_PERF_FRAMETIME = 2, WR_PERF_SPEED = 4, WR_PERF_ALL = 7 };
 void wr_overlay_set(int mask);
+void wr_overlay_set_top(float frac);             /* top of the panel, share of the height (the port's HUD) */
 int  wr_overlay_get(void);
 int  wr_overlay_parse(const char *v);              /* "fps+frametime", "all", "off" */
 void wr_overlay_format(int mask, char *out, size_t cap);
