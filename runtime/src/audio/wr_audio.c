@@ -327,6 +327,19 @@ static void mix(float *out, int frames)
 static void SDLCALL feed(void *ud, SDL_AudioStream *s, int additional, int total)
 {
     (void)ud; (void)total;
+    static int log = -1;
+    static uint64_t last, t0, maxgap, maxmix, calls, frames_req, minq = ~0ull;
+    uint64_t start = wr_time_ns();
+    if (log < 0)
+        log = getenv("WR_AUDIO_LOG") != NULL;
+    if (log) {   /* WR_AUDIO_LOG=1: the device's requests, every 2 s */
+        if (last && start - last > maxgap) maxgap = start - last;
+        if (!t0) t0 = start;
+        int q = SDL_GetAudioStreamQueued(s);
+        if ((uint64_t)q < minq) minq = (uint64_t)q;
+        calls++;
+        frames_req += (uint64_t)(additional / 8);
+    }
     static float buf[4096 * 2];
     while (additional > 0) {
         int frames = additional / 8;
@@ -338,6 +351,17 @@ static void SDLCALL feed(void *ud, SDL_AudioStream *s, int additional, int total
         SDL_PutAudioStreamData(s, buf, frames * 8);
         additional -= frames * 8;
     }
+    if (log) {
+        uint64_t end = wr_time_ns();
+        if (end - start > maxmix) maxmix = end - start;
+        last = start;
+        if (end - t0 > 2000000000ull) {
+            wr_log("audio: %llu calls, %llu frames asked (%.0f per call), longest gap %.1f ms, longest mix %.2f ms, "
+                   "least queued %llu bytes", (unsigned long long)calls, (unsigned long long)frames_req,
+                   calls ? (double)frames_req / (double)calls : 0.0, maxgap / 1e6, maxmix / 1e6, (unsigned long long)minq);
+            t0 = end; calls = frames_req = maxgap = maxmix = 0; minq = ~0ull;
+        }
+    }
 }
 
 int wr_audio_init(void)
@@ -347,6 +371,17 @@ int wr_audio_init(void)
     const char *na = getenv("WR_NOAUDIO");
     if (wr_platform_headless() || (na && *na == '1'))
         return 0;   /* silent: state is kept, buffers finish by time */
+#if defined(__ANDROID__)
+    /* SDL's low-latency AAudio stream has a buffer of a few ms: every small stall of the mixer thread is a gap
+     * (crackling sound, and Bink movies, paced by the sound, judder). A normal stream with ~21 ms is plenty. */
+    SDL_SetHint(SDL_HINT_ANDROID_LOW_LATENCY_AUDIO, "0");
+    /* AAudio called the mixer with gaps of 72..80 ms on the Odin 2 (underruns: crackling, Bink judder);
+     * OpenSL ES at most 24 ms (measured with WR_AUDIO_LOG, 2026-11-26). SDL_AUDIO_DRIVER still overrides. */
+    if (!SDL_GetHint(SDL_HINT_AUDIO_DRIVER))
+        SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "opensles");
+#endif
+    if (!SDL_GetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES))
+        SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
     if (!SDL_WasInit(SDL_INIT_AUDIO) && !SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         wr_log("audio: SDL audio init failed: %s", SDL_GetError());
         return 0;
