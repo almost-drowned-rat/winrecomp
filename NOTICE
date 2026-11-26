@@ -7,3 +7,42 @@ The x86 -> C pipeline under tools/ (disasm, func_id, abi_analysis, recomp,
 gameconfig.py) is taken from xboxrecomp (branch option-c), MIT licensed,
 Copyright (c) 2026 sp00nz; see LICENSE. winrecomp adds a Win32 PE front end
 (tools/disasm/loader.py: load_pe_image, tools/xbe_parser shim).
+
+Third-party code taken from xboxrecomp option-c (MIT) with its notices:
+
+  runtime/src/overlay/status_overlay.{c,h}, runtime/src/post/shader_pass.{c,h},
+  runtime/src/shaderpack/: option-c code, MIT (see LICENSE).
+
+  stb_truetype (runtime/src/overlay/third_party/stb/stb_truetype.h), nothings/stb,
+  v1.26, sha256 ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab;
+  (c) Sean Barrett / RAD Game Tools; MIT or public domain, at your choice
+  (the licence at the end of the header). Vendored unchanged; rasterises the
+  bundled font for the status overlays (runtime/src/overlay/status_overlay.c,
+  written for this toolkit). It reads only the bundled font.
+
+  DejaVu Sans Mono Bold (runtime/src/overlay/third_party/dejavu/:
+  DejaVuSansMono-Bold.ttf, LICENSE), dejavu-fonts 2.37
+  (dejavu-fonts-ttf-2.37.zip, sha256 of the font
+  bce60f1b4421acd9ea51ba6623d7024ecbe6817a953e3654df62a5e6bdf8f769); the
+  Bitstream Vera fonts (c) 2003 Bitstream, Inc., glyphs from the Arev fonts
+  (c) Tavmjong Bah, DejaVu changes in the public domain; the Bitstream Vera /
+  Arev licence (the LICENSE next to the font). Unmodified and under its own
+  name; built into the renderer as bytes at configure time (CMake turns the
+  font into a header).
+
+  miniz (src/shaderpack/third_party/miniz/: miniz_tinfl.c, miniz_tinfl.h,
+  miniz.h, miniz_common.h, miniz_tdef.h, miniz_zip.h, LICENSE),
+  richgel999/miniz, tag 3.1.2, commit 77d0dce; (c) 2013-2014 RAD Game Tools
+  and Valve Software, (c) 2010-2014 Rich Geldreich and Tenacious Software
+  LLC; MIT (the LICENSE next to the files). Vendored unchanged; only the
+  inflater (tinfl) is compiled, for the shader packs' zips
+  (runtime/src/shaderpack/zip_read.c, written for this toolkit).
+
+  librashader C header (runtime/src/post/third_party/librashader/librashader.h),
+  SnowflakePowered/librashader, tag librashader-v0.12.0, commit 87e8a97;
+  (c) 2022 chyyran; MIT (the licence text at the top of the file); identical
+  in v0.12.1. Only the header: the librashader library (MPL-2.0 or GPLv3) is
+  not part of this toolkit's sources -- a port's deps script builds it from
+  its upstream source (Vulkan runtime only) into a separate library next to the
+  exe, which runtime/src/post/shader_pass.c loads at run time. A distributed
+  build must ship librashader's licence and say where its source is.

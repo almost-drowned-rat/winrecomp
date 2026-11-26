@@ -190,6 +190,19 @@ VkDescriptorSet wr_vk_texture_alt_set(wr_vk_texture *t, VkSampler sampler);
 void wr_vk_blit(VkCommandBuffer cmd, wr_vk_target *t, int x, int y, int w, int h, float gamma);
 /* The same for a texture (movies). */
 void wr_vk_blit_texture(VkCommandBuffer cmd, wr_vk_texture *t, int x, int y, int w, int h, float gamma);
+/* The top-left part (us, vs of the size, 0..1) of a texture, no gamma. */
+void wr_vk_blit_texture_part(VkCommandBuffer cmd, wr_vk_texture *t, int x, int y, int w, int h, float us, float vs);
+
+/* PERFORMANCE overlay (wr_overlay.c): FPS / FRAME TIME / GAME SPEED */
+enum { WR_PERF_FPS = 1, WR_PERF_FRAMETIME = 2, WR_PERF_SPEED = 4, WR_PERF_ALL = 7 };
+void wr_overlay_set(int mask);
+int  wr_overlay_get(void);
+int  wr_overlay_parse(const char *v);              /* "fps+frametime", "all", "off" */
+void wr_overlay_format(int mask, char *out, size_t cap);
+void wr_overlay_set_tick_rate(double hz);         /* the game's own logic rate */
+void wr_overlay_game_tick(void);                  /* one game logic tick ran */
+void wr_overlay_prepare(void);                    /* once per frame, before the present pass */
+void wr_overlay_draw(VkCommandBuffer cmd);        /* in the present pass, after the picture */
 /* Largest aw:ah rectangle centred in sw x sh (pillar/letterbox). */
 void wr_vk_fit_rect(uint32_t sw, uint32_t sh, uint32_t aw, uint32_t ah, int *x, int *y, int *w, int *h);
 

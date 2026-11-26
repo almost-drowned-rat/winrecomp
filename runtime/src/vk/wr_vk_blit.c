@@ -21,7 +21,7 @@ static int blit_init(void)
 {
     if (g_pipe)
         return 1;
-    VkPushConstantRange pc = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16 };
+    VkPushConstantRange pc = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 };
     VkPipelineLayoutCreateInfo li = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
     li.setLayoutCount = 1;
     li.pSetLayouts = &g_vk.tex_layout;
@@ -77,20 +77,26 @@ static int blit_init(void)
     return 1;
 }
 
-void wr_vk_blit(VkCommandBuffer cmd, wr_vk_target *t, int x, int y, int w, int h, float gamma)
+static void blit_draw(VkCommandBuffer cmd, VkDescriptorSet set, int x, int y, int w, int h, float gamma,
+                      float us, float vs)
 {
-    if (!t || !t->set || w <= 0 || h <= 0 || !blit_init())
-        return;
     VkViewport v = { (float)x, (float)y, (float)w, (float)h, 0.0f, 1.0f };
     VkRect2D sc = { { x > 0 ? x : 0, y > 0 ? y : 0 }, { (uint32_t)w, (uint32_t)h } };
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipe);
     vkCmdSetViewport(cmd, 0, 1, &v);
     vkCmdSetScissor(cmd, 0, 1, &sc);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &t->set, 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &set, 0, NULL);
     float g = gamma > 0.05f ? 1.0f / gamma : 1.0f;
-    float pc[4] = { g, g, g, 1.0f };
-    vkCmdPushConstants(cmd, g_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, pc);
+    float pc[8] = { g, g, g, 1.0f, us, vs, 0.0f, 0.0f };
+    vkCmdPushConstants(cmd, g_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, pc);
     vkCmdDraw(cmd, 3, 1, 0, 0);
+}
+
+void wr_vk_blit(VkCommandBuffer cmd, wr_vk_target *t, int x, int y, int w, int h, float gamma)
+{
+    if (!t || !t->set || w <= 0 || h <= 0 || !blit_init())
+        return;
+    blit_draw(cmd, t->set, x, y, w, h, gamma, 1.0f, 1.0f);
 }
 
 void wr_vk_fit_rect(uint32_t sw, uint32_t sh, uint32_t aw, uint32_t ah, int *x, int *y, int *w, int *h)
@@ -107,14 +113,12 @@ void wr_vk_blit_texture(VkCommandBuffer cmd, wr_vk_texture *t, int x, int y, int
 {
     if (!t || !t->set || w <= 0 || h <= 0 || !blit_init())
         return;
-    VkViewport v = { (float)x, (float)y, (float)w, (float)h, 0.0f, 1.0f };
-    VkRect2D sc = { { x > 0 ? x : 0, y > 0 ? y : 0 }, { (uint32_t)w, (uint32_t)h } };
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipe);
-    vkCmdSetViewport(cmd, 0, 1, &v);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &t->set, 0, NULL);
-    float g = gamma > 0.05f ? 1.0f / gamma : 1.0f;
-    float pc[4] = { g, g, g, 1.0f };
-    vkCmdPushConstants(cmd, g_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, pc);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    blit_draw(cmd, t->set, x, y, w, h, gamma, 1.0f, 1.0f);
+}
+
+void wr_vk_blit_texture_part(VkCommandBuffer cmd, wr_vk_texture *t, int x, int y, int w, int h, float us, float vs)
+{
+    if (!t || !t->set || w <= 0 || h <= 0 || !blit_init())
+        return;
+    blit_draw(cmd, t->set, x, y, w, h, 1.0f, us, vs);
 }
