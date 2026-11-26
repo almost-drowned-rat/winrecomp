@@ -128,6 +128,15 @@ def main():
             seed_funcs.extend(_got)
             if args.verbose:
                 print(f"  Seed file {_seed_path}: {len(_got)} addresses")
+        # winrecomp: a PE DLL's exports are function starts
+        try:
+            from .loader import load_image as _li
+            _img = _li(args.xbe_path)
+            if _img.exports:
+                seed_funcs.extend(_img.exports)
+                print(f"  {len(_img.exports)} exported functions seeded")
+        except Exception:
+            pass
         seed_funcs = sorted(set(seed_funcs))
         disassembler = Disassembler(
             xbe_path=args.xbe_path,

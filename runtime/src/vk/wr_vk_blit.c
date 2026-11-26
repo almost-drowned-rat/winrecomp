@@ -102,3 +102,19 @@ void wr_vk_fit_rect(uint32_t sw, uint32_t sh, uint32_t aw, uint32_t ah, int *x, 
     *x = ((int)sw - *w) / 2;
     *y = ((int)sh - *h) / 2;
 }
+
+void wr_vk_blit_texture(VkCommandBuffer cmd, wr_vk_texture *t, int x, int y, int w, int h, float gamma)
+{
+    if (!t || !t->set || w <= 0 || h <= 0 || !blit_init())
+        return;
+    VkViewport v = { (float)x, (float)y, (float)w, (float)h, 0.0f, 1.0f };
+    VkRect2D sc = { { x > 0 ? x : 0, y > 0 ? y : 0 }, { (uint32_t)w, (uint32_t)h } };
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pipe);
+    vkCmdSetViewport(cmd, 0, 1, &v);
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &t->set, 0, NULL);
+    float g = gamma > 0.05f ? 1.0f / gamma : 1.0f;
+    float pc[4] = { g, g, g, 1.0f };
+    vkCmdPushConstants(cmd, g_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, pc);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+}

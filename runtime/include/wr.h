@@ -11,7 +11,8 @@
  *   0x00000000-0x0000FFFF  no access (null pointer guard)
  *   0x00010000-0x003EFFFF  main thread stack (grows down from WR_STACK_TOP)
  *   ImageBase ...          the PE image (gta2.exe: 0x00400000-0x00678000)
- *   0x01000000-0x3FFFFFFF  heap arena (HeapAlloc / LocalAlloc / runtime data)
+ *   0x01000000-0x0FEFFFFF  heap arena (HeapAlloc / LocalAlloc / runtime data)
+ *   0x10000000-0x3FFFFFFF  further PE modules at their image bases (binkw32 ...)
  *   0x40000000-0x7FFCFFFF  VirtualAlloc regions
  *   0x7FFD0000-0x7FFDFFFF  PEB / TEB
  *   0xFE000000-0xFE00FFFF  synthetic import / COM method addresses (not memory)
@@ -36,7 +37,9 @@ extern "C" {
 #define WR_STACK_TOP       0x003F0000u
 #define WR_STACK_SIZE      0x00300000u
 #define WR_HEAP_LO         0x01000000u
-#define WR_HEAP_HI         0x40000000u
+#define WR_HEAP_HI         0x0FF00000u
+#define WR_MODULES_LO      0x10000000u
+#define WR_MODULES_HI      0x40000000u
 #define WR_VMEM_LO         0x40000000u
 #define WR_VMEM_HI         0x7FFD0000u
 #define WR_PEB_VA          0x7FFD0000u
@@ -113,8 +116,11 @@ typedef struct wr_export {
 
 typedef struct wr_module {
     const char      *name;     /* "KERNEL32.dll" (matched case-insensitively) */
-    const wr_export *exports;  /* terminated by { NULL, NULL } */
+    const wr_export *exports;  /* native exports, terminated by { NULL, NULL };
+                                  for a guest module: overrides of its own */
     uint32_t         handle;   /* guest HMODULE, assigned at registration */
+    uint32_t         guest_base; /* a lifted PE module: its image base (exports
+                                    resolve to guest code), 0 = native only */
 } wr_module;
 
 /* Register a native module (import source, LoadLibrary target). */
@@ -139,9 +145,21 @@ typedef struct wr_image {
 
 extern wr_image g_wr_image;
 
-/* Map a PE file and bind its imports. Unknown imports are bound to a handler
- * that stops with the import's name. 0 on failure (message logged). */
-int wr_pe_load(const char *host_path);
+/* The generated dispatch of one lifted module (tools/lift.sh prefixes them). */
+typedef recomp_func_t (*wr_lookup_fn)(uint32_t va);
+typedef int (*wr_dispatch_init_fn)(void);
+
+/* Map the main PE file and bind its imports. Unknown imports are bound to a
+ * handler that stops with the import's name. 0 on failure (message logged).
+ * Load lifted DLLs first: the exe's imports bind to them. */
+int wr_pe_load(const char *host_path, wr_lookup_fn lookup, wr_dispatch_init_fn init);
+/* Map a lifted DLL at its image base, bind its imports and register it as
+ * module `name` (exports -> its guest code; `overrides` are native exports
+ * that win over its own). DllMain runs in wr_run, before the exe's entry. */
+wr_module *wr_pe_load_dll(const char *host_path, const char *name, const wr_export *overrides,
+                          wr_lookup_fn lookup, wr_dispatch_init_fn init);
+/* Run DllMain(DLL_PROCESS_ATTACH) of every lifted DLL (wr_run does it). */
+void wr_pe_attach_dlls(X86Ctx *ctx);
 
 /* ---- calling into the guest ------------------------------------------------ */
 

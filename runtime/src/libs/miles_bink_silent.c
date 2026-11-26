@@ -221,5 +221,10 @@ static wr_module bink_mod = { "binkw32.dll", bink_exports, 0 };
 void wr_register_miles_bink_silent(void)
 {
     wr_module_register(&mss_mod);
+}
+
+/* Only when the real binkw32 is not lifted into the build. */
+void wr_register_bink_absent(void)
+{
     wr_module_register(&bink_mod);
 }

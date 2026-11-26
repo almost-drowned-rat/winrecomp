@@ -72,6 +72,8 @@ class BinaryImage:
     # winrecomp: [start, end) ranges inside code sections known to be data
     # (game.toml [disasm] data_ranges). No function may start there.
     data_ranges: List[Tuple[int, int]] = field(default_factory=list)
+    # winrecomp: exported function addresses of a PE DLL (seeds)
+    exports: List[int] = field(default_factory=list)
 
     # Lookup tables built after loading
     _section_by_name: Dict[str, SectionInfo] = field(default_factory=dict, repr=False)
@@ -341,7 +343,14 @@ def load_pe_image(pe_file: Path, raw_data: bytes) -> BinaryImage:
                 thunk_addr=imp.address,
             ))
 
+    exports = []
+    if hasattr(pe, 'DIRECTORY_ENTRY_EXPORT'):
+        for sym in pe.DIRECTORY_ENTRY_EXPORT.symbols:
+            if sym.address and not sym.forwarder:
+                exports.append(base + sym.address)
+
     return BinaryImage(
+        exports=sorted(set(exports)),
         filepath=str(pe_file),
         raw_data=raw_data,
         base_address=base,

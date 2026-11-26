@@ -257,8 +257,11 @@ uint32_t wr_call_guest(X86Ctx *ctx, uint32_t va, int n, const uint32_t *args)
 X86Ctx *g_wr_main_ctx;
 uint32_t g_wr_cmdline_va;
 
+uint32_t wr_heap_top(void);
+
 void wr_exit(uint32_t code)
 {
+    wr_log("heap: arena used up to 0x%08X (%u MB)", wr_heap_top(), (wr_heap_top() - WR_HEAP_LO) >> 20);
     wr_log("process exit, code %u", code);
     fflush(stderr);
     exit((int)code);
@@ -305,6 +308,7 @@ int wr_run(int argc, char **argv)
     setup_teb(ctx);
 
     recomp_dispatch_init();
+    wr_pe_attach_dlls(ctx);
     recomp_func_t entry = recomp_lookup(g_wr_image.entry);
     if (!entry) {
         wr_log("no translated function at the entry point 0x%08X", g_wr_image.entry);

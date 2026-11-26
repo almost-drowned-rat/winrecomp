@@ -89,6 +89,33 @@ wr_module *wr_module_by_handle(uint32_t h)
     return NULL;
 }
 
+/* An export of a lifted module, from the PE export directory in guest memory. */
+static uint32_t guest_export(uint32_t base, const char *name)
+{
+    uint32_t pe = base + wr_rd32(base + 0x3C);
+    uint32_t dir_rva = wr_rd32(pe + 24 + 96);
+    if (!dir_rva)
+        return 0;
+    uint32_t dir = base + dir_rva;
+    uint32_t nfuncs = wr_rd32(dir + 20), nnames = wr_rd32(dir + 24);
+    uint32_t funcs = base + wr_rd32(dir + 28), names = base + wr_rd32(dir + 32), ords = base + wr_rd32(dir + 36);
+    uint32_t idx = 0xFFFFFFFFu;
+    if (name[0] == '#') {
+        uint32_t ord = (uint32_t)atoi(name + 1);
+        idx = ord - wr_rd32(dir + 16);
+    } else {
+        for (uint32_t i = 0; i < nnames; i++)
+            if (!strcmp((const char *)wr_ptr(base + wr_rd32(names + 4 * i)), name)) {
+                idx = wr_rd16(ords + 2 * i);
+                break;
+            }
+    }
+    if (idx >= nfuncs)
+        return 0;
+    uint32_t rva = wr_rd32(funcs + 4 * idx);
+    return rva ? base + rva : 0;
+}
+
 uint32_t wr_module_proc(wr_module *m, const char *name)
 {
     for (const wr_export *e = m->exports; e->name; e++)
@@ -102,6 +129,8 @@ uint32_t wr_module_proc(wr_module *m, const char *name)
             }
             return wr_thunk_for(e->fn, label);
         }
+    if (m->guest_base)
+        return guest_export(m->guest_base, name);
     return 0;
 }
 
@@ -132,6 +161,45 @@ static const wr_handler_t g_unbound_fns[MAX_UNBOUND] = { U64(0) U64(1) U64(2) U6
 /* Entry i is unbound_<i in three octal digits>, laid out in index order. */
 static wr_handler_t unbound_fn(int i) { return g_unbound_fns[i]; }
 
+/* ---- lifted modules: lookup routing ------------------------------------------------ */
+
+typedef struct code_module {
+    uint32_t lo, hi;           /* image range */
+    uint32_t base, entry;
+    wr_lookup_fn lookup;
+    wr_dispatch_init_fn init;
+    int is_dll;
+} code_module;
+static code_module g_cm[8];
+static int g_ncm;
+
+recomp_func_t recomp_lookup(uint32_t va)
+{
+    for (int i = 0; i < g_ncm; i++)
+        if (va - g_cm[i].lo < g_cm[i].hi - g_cm[i].lo)
+            return g_cm[i].lookup(va);
+    return NULL;
+}
+
+int recomp_dispatch_init(void)
+{
+    int ok = 1;
+    for (int i = 0; i < g_ncm; i++)
+        if (g_cm[i].init)
+            ok &= g_cm[i].init();
+    return ok;
+}
+
+void wr_pe_attach_dlls(X86Ctx *ctx)
+{
+    for (int i = 0; i < g_ncm; i++)
+        if (g_cm[i].is_dll && g_cm[i].entry != g_cm[i].base) {
+            uint32_t args[3] = { g_cm[i].base, 1 /* DLL_PROCESS_ATTACH */, 0 };
+            uint32_t r = wr_call_guest(ctx, g_cm[i].entry, 3, args);
+            wr_log("pe: DllMain of module at 0x%08X -> %u", g_cm[i].base, r);
+        }
+}
+
 /* ---- PE loading --------------------------------------------------------------- */
 
 static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
@@ -140,7 +208,7 @@ static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] 
 /* SHA-1 (for the variant check and the log) */
 static void sha1(const uint8_t *data, size_t len, uint8_t out[20]);
 
-int wr_pe_load(const char *path)
+static int pe_map(const char *path, wr_image *img, int is_dll, wr_lookup_fn lookup, wr_dispatch_init_fn init)
 {
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -190,15 +258,15 @@ int wr_pe_load(const char *path)
     memset(wr_ptr(ibase), 0, isize);
     memcpy(wr_ptr(ibase), file, hsize < (uint32_t)len ? hsize : (uint32_t)len);
 
-    g_wr_image.base = ibase;
-    g_wr_image.size = isize;
-    g_wr_image.entry = ibase + entry;
-    g_wr_image.code_lo = 0xFFFFFFFFu;
-    g_wr_image.code_hi = 0;
-    g_wr_image.iat_lo = ibase + iat_rva;
-    g_wr_image.iat_hi = ibase + iat_rva + iat_size;
-    snprintf(g_wr_image.host_path, sizeof g_wr_image.host_path, "%s", path);
-    sha1(file, (size_t)len, g_wr_image.sha1);
+    img->base = ibase;
+    img->size = isize;
+    img->entry = ibase + entry;
+    img->code_lo = 0xFFFFFFFFu;
+    img->code_hi = 0;
+    img->iat_lo = ibase + iat_rva;
+    img->iat_hi = ibase + iat_rva + iat_size;
+    snprintf(img->host_path, sizeof img->host_path, "%s", path);
+    sha1(file, (size_t)len, img->sha1);
 
     const uint8_t *sh = oh + ohsize;
     for (int i = 0; i < nsec; i++, sh += 40) {
@@ -210,15 +278,18 @@ int wr_pe_load(const char *path)
             n = roff < (uint32_t)len ? (uint32_t)len - roff : 0;
         memcpy(wr_ptr(ibase + va), file + roff, n);
         if (ch & 0x20000020u) {   /* CODE / EXECUTE */
-            if (ibase + va < g_wr_image.code_lo) g_wr_image.code_lo = ibase + va;
-            if (ibase + va + vsize > g_wr_image.code_hi) g_wr_image.code_hi = ibase + va + vsize;
+            if (ibase + va < img->code_lo) img->code_lo = ibase + va;
+            if (ibase + va + vsize > img->code_hi) img->code_hi = ibase + va + vsize;
         }
         char name[9] = { 0 };
         memcpy(name, sh, 8);
         wr_log("pe: section %-8s 0x%08X +0x%06X (file 0x%X)", name, ibase + va, vsize, rsize);
     }
-    g_xbox_code_lo = g_wr_image.code_lo;
-    g_xbox_code_hi = g_wr_image.code_hi;
+    /* indirect calls may target any lifted module: the "is code" window spans them all */
+    if (!g_xbox_code_hi || img->code_lo < g_xbox_code_lo) g_xbox_code_lo = img->code_lo;
+    if (img->code_hi > g_xbox_code_hi) g_xbox_code_hi = img->code_hi;
+    if (g_ncm < 8)
+        g_cm[g_ncm++] = (code_module){ ibase, ibase + isize, ibase, img->entry, lookup, init, is_dll };
     wr_vmem_note_fixed(ibase, ibase + isize, WR_MEM_IMAGE, 0x40 /* PAGE_EXECUTE_READWRITE */);
 
     /* Imports: write a synthetic address into every IAT slot. */
@@ -255,9 +326,35 @@ int wr_pe_load(const char *path)
         }
     }
     wr_log("pe: %s: base 0x%08X size 0x%X entry 0x%08X, %d imports bound, %d unbound",
-           path, ibase, isize, g_wr_image.entry, bound, unbound);
+           path, ibase, isize, img->entry, bound, unbound);
     free(file);
     return 1;
+}
+
+int wr_pe_load(const char *path, wr_lookup_fn lookup, wr_dispatch_init_fn init)
+{
+    return pe_map(path, &g_wr_image, 0, lookup, init);
+}
+
+wr_module *wr_pe_load_dll(const char *path, const char *name, const wr_export *overrides,
+                          wr_lookup_fn lookup, wr_dispatch_init_fn init)
+{
+    static wr_image imgs[8];
+    static wr_module mods[8];
+    static const wr_export none[] = { { NULL, NULL } };
+    static int n;
+    if (n >= 8)
+        return NULL;
+    wr_image *img = &imgs[n];
+    if (!pe_map(path, img, 1, lookup, init))
+        return NULL;
+    wr_module *m = &mods[n++];
+    m->name = name;
+    m->exports = overrides ? overrides : none;
+    m->guest_base = img->base;
+    wr_module_register(m);
+    m->handle = img->base;   /* a real HMODULE: the image base */
+    return m;
 }
 
 /* ---- SHA-1 (public domain style, compact) ------------------------------------- */

@@ -1230,6 +1230,28 @@ WR_HANDLER(k_GetPrivateProfileStringA)
     WR_RET(wr_put_str(out, cap, result), 6);
 }
 
+/* ---- used by lifted DLLs (binkw32) ------------------------------------------------- */
+
+WR_HANDLER(k_SetErrorMode) { (void)base; WR_RET(0, 1); }
+WR_HANDLER(k_GetVersion) { (void)base; WR_RET(0x0A280105u, 0); }   /* 5.1 build 2600 (XP), NT */
+WR_HANDLER(k_DisableThreadLibraryCalls) { (void)base; WR_RET(1, 1); }
+
+/* Guest threads are not supported (one guest thread). Callers that check the
+ * result fall back to working synchronously (Bink's background reader). */
+WR_HANDLER(k_CreateThread)
+{
+    (void)base;
+    wr_log("CreateThread(start 0x%08X): guest threads not supported, refused", WR_ARG(2));
+    WR_SETERR(8);
+    WR_RET(0, 6);
+}
+
+WR_HANDLER(k_RaiseException)
+{
+    (void)base;
+    wr_fatal("RaiseException(0x%08X, flags %u) from 0x%08X", WR_ARG(0), WR_ARG(1), wr_rd32(g_esp));
+}
+
 /* ---- module table ------------------------------------------------------------------- */
 
 #define E(n) { #n, k_##n }
@@ -1251,6 +1273,7 @@ static const wr_export k_exports[] = {
     E(CompareStringA), E(SetEndOfFile), E(FileTimeToSystemTime), E(GetCurrentProcess), E(TerminateProcess),
     E(GetModuleHandleA), E(ExitProcess), E(SetCurrentDirectoryA), E(GetCurrentDirectoryA),
     E(SetEnvironmentVariableA), E(HeapFree), E(RtlUnwind), E(HeapAlloc), E(CompareStringW),
+    E(SetErrorMode), E(GetVersion), E(DisableThreadLibraryCalls), E(CreateThread), E(RaiseException),
     { NULL, NULL }
 };
 #undef E

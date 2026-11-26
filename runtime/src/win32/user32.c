@@ -230,10 +230,20 @@ static void script_key(uint8_t vk, uint8_t dik, int up)
     post(mw->hwnd, up ? WM_KEYUP : WM_KEYDOWN, vk, key_lparam(dik, up, 0), chr);
 }
 
+uint32_t wr_heap_top(void);
+
 void w32_pump_events(X86Ctx *ctx)
 {
     (void)ctx;
     wr_heartbeat++;
+    {   /* heap high-water mark, logged when it grows by 16 MB */
+        static uint32_t mark;
+        uint32_t top = wr_heap_top();
+        if (top >= mark + (16u << 20)) {
+            mark = top & ~0xFFFFFu;
+            wr_log("heap: arena at %u MB", (top - WR_HEAP_LO) >> 20);
+        }
+    }
     run_timers();
     wr_input_script_tick(script_key);
     wr_pad_tick(script_key);
@@ -902,6 +912,49 @@ WR_HANDLER(u_wsprintfA)
     WR_RET_C(n);
 }
 
+/* ---- used by lifted DLLs (binkw32) -------------------------------------------------- */
+
+WR_HANDLER(u_BeginPaint)
+{
+    (void)base;
+    if (WR_ARG(1))
+        memset(wr_ptr(WR_ARG(1)), 0, 64);
+    WR_RET(0x00030001u, 2);
+}
+WR_HANDLER(u_EndPaint) { (void)ctx; (void)base; WR_RET(1, 2); }
+WR_HANDLER(u_UnregisterClassA) { (void)ctx; (void)base; WR_RET(1, 2); }
+WR_HANDLER(u_SetCursor) { (void)ctx; (void)base; WR_RET(0, 1); }
+WR_HANDLER(u_ScreenToClient) { (void)ctx; (void)base; WR_RET(1, 2); }
+WR_HANDLER(u_ClientToScreen) { (void)ctx; (void)base; WR_RET(1, 2); }
+WR_HANDLER(u_GetCursorPos)
+{
+    (void)base;
+    if (WR_ARG(0)) { wr_wr32(WR_ARG(0), 0); wr_wr32(WR_ARG(0) + 4, 0); }
+    WR_RET(1, 1);
+}
+WR_HANDLER(u_IsWindowVisible)
+{
+    (void)base;
+    wwin *w = win_get(WR_ARG(0));
+    WR_RET(w && w->shown, 1);
+}
+WR_HANDLER(u_GetClassLongA) { (void)ctx; (void)base; WR_RET(0, 2); }
+WR_HANDLER(u_GetActiveWindow)
+{
+    (void)ctx; (void)base;
+    wwin *w = main_win();
+    WR_RET(w ? w->hwnd : 0, 0);
+}
+WR_HANDLER(u_GetWindowThreadProcessId)
+{
+    (void)base;
+    if (WR_ARG(1))
+        wr_wr32(WR_ARG(1), 1);
+    WR_RET(2, 2);
+}
+WR_HANDLER(u_GetWindow) { (void)ctx; (void)base; WR_RET(0, 2); }
+WR_HANDLER(u_GetTopWindow) { (void)ctx; (void)base; WR_RET(0, 1); }
+
 #define E(n) { #n, u_##n }
 static const wr_export u_exports[] = {
     E(PostMessageA), E(FindWindowExA), E(CreateWindowExA), E(LoadIconA), E(LoadCursorA), E(RegisterClassA),
@@ -912,6 +965,9 @@ static const wr_export u_exports[] = {
     E(KillTimer), E(SetWindowLongA), E(GetWindowRect), E(SetTimer), E(DialogBoxParamA), E(DestroyWindow),
     E(GetKeyboardLayoutNameA), E(wsprintfA), E(ShowCursor), E(UpdateWindow), E(SetWindowPos), E(ReleaseDC),
     E(GetDC), E(GetClientRect), E(DefWindowProcA),
+    E(BeginPaint), E(EndPaint), E(UnregisterClassA), E(SetCursor), E(ScreenToClient), E(ClientToScreen),
+    E(GetCursorPos), E(IsWindowVisible), E(GetClassLongA), E(GetActiveWindow), E(GetWindowThreadProcessId),
+    E(GetWindow), E(GetTopWindow),
     { NULL, NULL }
 };
 #undef E

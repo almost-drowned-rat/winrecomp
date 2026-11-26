@@ -188,6 +188,8 @@ VkDescriptorSet wr_vk_texture_alt_set(wr_vk_texture *t, VkSampler sampler);
 /* Present pass: draw a target into (x, y, w, h) of the swapchain image with
  * the given gamma (1.0 = none). */
 void wr_vk_blit(VkCommandBuffer cmd, wr_vk_target *t, int x, int y, int w, int h, float gamma);
+/* The same for a texture (movies). */
+void wr_vk_blit_texture(VkCommandBuffer cmd, wr_vk_texture *t, int x, int y, int w, int h, float gamma);
 /* Largest aw:ah rectangle centred in sw x sh (pillar/letterbox). */
 void wr_vk_fit_rect(uint32_t sw, uint32_t sh, uint32_t aw, uint32_t ah, int *x, int *y, int *w, int *h);
 

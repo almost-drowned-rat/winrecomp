@@ -588,7 +588,11 @@ WR_HANDLER(dp_DirectPlayLobbyCreateA)
 
 /* ---- tables -------------------------------------------------------------------------- */
 
-static const wr_export g32_exports[] = { { "GetDeviceCaps", g_GetDeviceCaps }, { NULL, NULL } };
+WR_HANDLER(g_SetPixel) { (void)base; WR_RET(0, 4); }
+WR_HANDLER(g_GetPixel) { (void)base; WR_RET(0, 3); }
+
+static const wr_export g32_exports[] = { { "GetDeviceCaps", g_GetDeviceCaps }, { "SetPixel", g_SetPixel },
+                                         { "GetPixel", g_GetPixel }, { NULL, NULL } };
 static const wr_export a32_exports[] = {
     { "IsTextUnicode", a_IsTextUnicode }, { "RegDeleteValueA", a_RegDeleteValueA },
     { "RegOpenKeyExA", a_RegOpenKeyExA }, { "GetUserNameA", a_GetUserNameA },

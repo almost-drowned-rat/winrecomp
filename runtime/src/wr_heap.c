@@ -348,6 +348,8 @@ int wr_heap_check(void)
     return 1;
 }
 
+uint32_t wr_heap_top(void) { return g_top; }
+
 uint32_t wr_galloc(uint32_t size)
 {
     uint32_t va = wr_heap_alloc(size, 1);
