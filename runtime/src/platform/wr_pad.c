@@ -83,7 +83,9 @@ static void open_pads(void)
             if (!g_pads[k]) {
                 g_pads[k] = SDL_OpenGamepad(ids[i]);
                 if (g_pads[k])
-                    wr_log("pad %d: %s", k, SDL_GetGamepadName(g_pads[k]));
+                    wr_log("pad %d: %s (rumble %s)", k, SDL_GetGamepadName(g_pads[k]),
+                           SDL_GetBooleanProperty(SDL_GetGamepadProperties(g_pads[k]), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN,
+                                                  false) ? "yes" : "no");
                 break;
             }
     }
@@ -307,15 +309,53 @@ int wr_pad_stick_right(float *x, float *y)
     return 0;
 }
 
+/* The device's own vibrator (Android: handhelds like the Odin 2, whose built-in pad has no motor of its own -
+ * SDL lists the phone vibrator as a haptic device). */
+static SDL_Haptic *device_haptic(void)
+{
+    static int tried;
+    static SDL_Haptic *h;
+    if (tried)
+        return h;
+    tried = 1;
+    if (!SDL_WasInit(SDL_INIT_HAPTIC) && !SDL_InitSubSystem(SDL_INIT_HAPTIC))
+        return NULL;
+    int n = 0;
+    SDL_HapticID *ids = SDL_GetHaptics(&n);
+    for (int i = 0; ids && i < n && !h; i++) {
+        h = SDL_OpenHaptic(ids[i]);
+        if (h && !SDL_InitHapticRumble(h)) {
+            SDL_CloseHaptic(h);
+            h = NULL;
+        }
+        if (h)
+            wr_log("pad: rumble through the device vibrator (%s)", SDL_GetHapticNameForID(ids[i]));
+    }
+    SDL_free(ids);
+    return h;
+}
+
 /* Rumble on every open controller: low / high motor 0..1, for ms milliseconds
- * (a newer call replaces a running one, as SDL does). */
+ * (a newer call replaces a running one, as SDL does). A pad without motors (the Odin's built-in one) uses the
+ * device vibrator instead. */
 void wr_pad_rumble(float low, float high, uint32_t ms)
 {
+    int any = 0;
+    for (int k = 0; k < 4; k++)
+        if (g_pads[k] && SDL_GetBooleanProperty(SDL_GetGamepadProperties(g_pads[k]), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false))
+            any = 1;
+    if (!any) {
+        SDL_Haptic *h = device_haptic();
+        float st = low > high ? low : high;
+        if (h && st > 0)
+            SDL_PlayHapticRumble(h, st > 1 ? 1.0f : st, ms);
+        return;
+    }
     if (low < 0) low = 0;
     if (low > 1) low = 1;
     if (high < 0) high = 0;
     if (high > 1) high = 1;
     for (int k = 0; k < 4; k++)
-        if (g_pads[k])
-            SDL_RumbleGamepad(g_pads[k], (Uint16)(low * 65535.0f), (Uint16)(high * 65535.0f), ms);
+        if (g_pads[k] && !SDL_RumbleGamepad(g_pads[k], (Uint16)(low * 65535.0f), (Uint16)(high * 65535.0f), ms))
+            WR_ONCE("pad: rumble failed: %s", SDL_GetError());
 }
