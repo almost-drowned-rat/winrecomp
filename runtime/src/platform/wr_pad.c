@@ -11,12 +11,15 @@
 #include "wr.h"
 
 #include <SDL3/SDL.h>
+#include <stdlib.h>
 #include <string.h>
 
 static SDL_Gamepad *g_pads[4];
 static wr_pad_map_fn g_map;
 static uint8_t g_down[256];        /* virtual DIK state from pads */
 static int g_inited;
+static int g_log;                  /* WR_PAD_LOG=1: every press */
+static uint64_t g_ctl_prev[4];
 
 void wr_pad_set_map(wr_pad_map_fn fn) { g_map = fn; }
 
@@ -72,9 +75,12 @@ void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up))
         return;
     if (!g_inited) {
         g_inited = 1;
+        const char *e = getenv("WR_PAD_LOG");
+        g_log = e && *e == '1';
         open_pads();
     }
     uint8_t now[256];
+    uint64_t ctl_now[4] = { 0, 0, 0, 0 };
     memset(now, 0, sizeof now);
     for (int k = 0; k < 4; k++) {
         SDL_Gamepad *p = g_pads[k];
@@ -98,6 +104,9 @@ void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up))
             uint8_t dik = g_map(c);
             if (dik)
                 now[dik] = 0x80;
+            if (g_log && !(g_ctl_prev[k] >> c & 1))
+                wr_log("pad %d: control %d -> DIK 0x%02X", k, c, dik);
+            ctl_now[k] |= 1ull << c;
         }
     }
     for (int i = 1; i < 256; i++) {
@@ -115,6 +124,7 @@ void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up))
         }
     }
     memcpy(g_down, now, sizeof now);
+    memcpy(g_ctl_prev, ctl_now, sizeof ctl_now);
 }
 
 void wr_pad_dik(uint8_t st[256])
