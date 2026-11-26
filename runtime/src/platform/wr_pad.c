@@ -306,3 +306,16 @@ int wr_pad_stick_right(float *x, float *y)
         }
     return 0;
 }
+
+/* Rumble on every open controller: low / high motor 0..1, for ms milliseconds
+ * (a newer call replaces a running one, as SDL does). */
+void wr_pad_rumble(float low, float high, uint32_t ms)
+{
+    if (low < 0) low = 0;
+    if (low > 1) low = 1;
+    if (high < 0) high = 0;
+    if (high > 1) high = 1;
+    for (int k = 0; k < 4; k++)
+        if (g_pads[k])
+            SDL_RumbleGamepad(g_pads[k], (Uint16)(low * 65535.0f), (Uint16)(high * 65535.0f), ms);
+}

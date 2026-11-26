@@ -46,6 +46,7 @@ void wr_pad_dik(uint8_t st[256]);
 int  wr_pad_stick(float *x, float *y);
 /* d-pad of the first pad as a direction (-1/0/1, y down); 1 while pressed */
 int  wr_pad_dpad(int *x, int *y);
+void wr_pad_rumble(float low, float high, uint32_t ms);   /* every open controller */
 int  wr_pad_stick_right(float *x, float *y);   /* right stick (WR_FAKE_RSTICK for dev runs) */
 /* rebinding: held controls (bit per WR_PAD_*), their names; the keyboard alone */
 uint64_t    wr_pad_controls(void);
