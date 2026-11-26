@@ -4,6 +4,13 @@
  */
 #include "wr.h"
 
+#include <SDL3/SDL.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -267,6 +274,35 @@ void wr_exit(uint32_t code)
     exit((int)code);
 }
 
+/* RESTART NOW (a setting that only applies at start, e.g. the language):
+ * everything the player chose is already on disk (settings.ini and the
+ * registry file are written at once), so the process just starts itself
+ * again with the same arguments. */
+static char **g_argv;
+
+void wr_restart(void)
+{
+    wr_log("restart requested");
+    fflush(stderr);
+    SDL_Quit();   /* give back the display mode, window and audio device */
+#if defined(_WIN32)
+    STARTUPINFOA si = { sizeof si };
+    PROCESS_INFORMATION pi;
+    if (CreateProcessA(NULL, GetCommandLineA(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    exit(0);
+#elif defined(__ANDROID__)
+    exit(0);   /* M8: the activity restarts the game */
+#else
+    if (g_argv)
+        execv("/proc/self/exe", g_argv);
+    wr_log("restart: exec failed, exiting");
+    exit(0);
+#endif
+}
+
 static void setup_teb(X86Ctx *ctx)
 {
     wr_mem_commit(WR_PEB_VA, 0x10000u);
@@ -286,6 +322,7 @@ static void setup_teb(X86Ctx *ctx)
 
 int wr_run(int argc, char **argv)
 {
+    g_argv = argv;
     static X86Ctx main_ctx;
     X86Ctx *ctx = &main_ctx;
     uint8_t *base = (uint8_t *)g_xbox_mem_offset;

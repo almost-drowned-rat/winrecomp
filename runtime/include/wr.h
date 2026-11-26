@@ -185,6 +185,8 @@ void wr_miles_set_half_stereo_rate(int on);
 
 /* The port's settings file saves/settings.ini (wr_settings.c): key=value,
  * unknown lines kept, atomic writes; <prefix>_<KEY> env overrides one run. */
+void wr_restart(void);   /* start the game again (RESTART NOW); never returns */
+
 void wr_settings_init(const char *env_prefix);       /* after wr_paths_init */
 const char *wr_settings_get(const char *key, const char *def);
 int  wr_settings_get_int(const char *key, int def);
