@@ -732,8 +732,10 @@ VkCommandBuffer wr_vk_frame_begin(void)
         wr_log("vulkan: acquire failed (%d)", (int)r);
         return NULL;
     }
+#if !defined(__ANDROID__)
     if (r == VK_SUBOPTIMAL_KHR)
         g_vk.need_recreate = 1;
+#endif
     vkResetFences(g_vk.dev, 1, &f->fence);
     vkResetCommandPool(g_vk.dev, f->pool, 0);
     f->vused = 0;
@@ -836,7 +838,13 @@ void wr_vk_frame_end(void)
     pi.pSwapchains = &g_vk.swapchain;
     pi.pImageIndices = &g_vk.image;
     VkResult r = vkQueuePresentKHR(g_vk.queue, &pi);
+#if defined(__ANDROID__)
+    /* identity transform on a panel that is natively portrait (Odin 2): every present says SUBOPTIMAL - it stays
+     * so after a rebuild, which would then happen every frame; only OUT_OF_DATE needs a new swapchain */
+    if (r == VK_ERROR_OUT_OF_DATE_KHR)
+#else
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
+#endif
         g_vk.need_recreate = 1;
     g_vk.in_frame = 0;
     if (g_dump[0].pending || g_dump[1].pending)
