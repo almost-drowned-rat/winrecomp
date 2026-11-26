@@ -103,7 +103,33 @@ static void *watchdog(void *arg)
 #if defined(_WIN32)
 static LONG WINAPI on_exception(EXCEPTION_POINTERS *ep)
 {
-    report("exception", (uintptr_t)ep->ExceptionRecord->ExceptionInformation[1]);
+    static volatile LONG in;
+    if (InterlockedIncrement(&in) > 1)
+        return EXCEPTION_CONTINUE_SEARCH;
+    EXCEPTION_RECORD *er = ep->ExceptionRecord;
+    DWORD code = er->ExceptionCode;
+    const char *name = code == EXCEPTION_ACCESS_VIOLATION ? "ACCESS_VIOLATION"
+                     : code == EXCEPTION_ILLEGAL_INSTRUCTION ? "ILLEGAL_INSTRUCTION"
+                     : code == EXCEPTION_INT_DIVIDE_BY_ZERO ? "INT_DIVIDE_BY_ZERO"
+                     : code == EXCEPTION_STACK_OVERFLOW ? "STACK_OVERFLOW"
+                     : code == EXCEPTION_IN_PAGE_ERROR ? "IN_PAGE_ERROR" : "exception";
+    /* where: the host code address as module + offset (the exe's offset maps to a function
+     * with llvm-nm / the linker map; the release exe carries no symbols) */
+    uintptr_t pc = (uintptr_t)er->ExceptionAddress;
+    HMODULE mod = NULL;
+    char mname[MAX_PATH] = "?";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)pc, &mod) && mod) {
+        GetModuleFileNameA(mod, mname, sizeof mname);
+        const char *slash = strrchr(mname, '\\');
+        wr_log("CRASH: %s (0x%08lX) at %s+0x%llx", name, (unsigned long)code, slash ? slash + 1 : mname,
+               (unsigned long long)(pc - (uintptr_t)mod));
+    } else {
+        wr_log("CRASH: %s (0x%08lX) at host pc %p", name, (unsigned long)code, (void *)pc);
+    }
+    uintptr_t fault = (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR)
+                      && er->NumberParameters >= 2 ? (uintptr_t)er->ExceptionInformation[1] : 0;
+    report(name, fault);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #else

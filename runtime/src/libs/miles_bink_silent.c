@@ -51,9 +51,8 @@ WR_HANDLER(ail_delay)
 {
     (void)base;
     uint32_t ticks = WR_ARG(0);   /* 1/60 s */
-    struct timespec ts = { 0, (long)ticks * 16666667L };
-    if (ticks < 120)
-        nanosleep(&ts, NULL);
+    if (ticks < 120)   /* wr_sleep_ns: 60+ ticks are >= 1 s, an invalid tv_nsec for nanosleep */
+        wr_sleep_ns((uint64_t)ticks * 16666667ull);
     WR_RET(0, 1);
 }
 

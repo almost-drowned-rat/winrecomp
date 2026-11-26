@@ -54,6 +54,15 @@ target_include_directories(winrecomp_rt PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/../templates/runtime)
 target_link_libraries(winrecomp_rt PUBLIC SDL3::SDL3 xbox_shaderpack m)
+# Vulkan: headers only (VK_NO_PROTOTYPES, the loader comes through SDL_Vulkan_GetVkGetInstanceProcAddr).
+# On Linux they are system headers; on Windows they come from the Vulkan SDK (VULKAN_SDK).
+# Threads: pthreads + nanosleep (winpthreads on llvm-mingw, libc on Linux)
+find_package(Threads REQUIRED)
+target_link_libraries(winrecomp_rt PUBLIC Threads::Threads)
+find_path(WR_VULKAN_INCLUDE_DIR vulkan/vulkan.h HINTS "$ENV{VULKAN_SDK}/Include" "$ENV{VULKAN_SDK}/include")
+if(WR_VULKAN_INCLUDE_DIR)
+    target_include_directories(winrecomp_rt SYSTEM PUBLIC ${WR_VULKAN_INCLUDE_DIR})
+endif()
 set_target_properties(winrecomp_rt PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 if(NOT MSVC)
     target_compile_options(winrecomp_rt PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fwrapv -fno-strict-aliasing)

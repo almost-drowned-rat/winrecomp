@@ -147,11 +147,8 @@ WR_HANDLER(ail_delay)
 {
     (void)base;
     uint32_t ticks = WR_ARG(0);   /* 1/60 s */
-    if (ticks < 600) {
-        uint64_t ns = (uint64_t)ticks * 16666667ull;
-        struct timespec ts = { (time_t)(ns / 1000000000ull), (long)(ns % 1000000000ull) };
-        nanosleep(&ts, NULL);
-    }
+    if (ticks < 600)
+        wr_sleep_ns((uint64_t)ticks * 16666667ull);
     WR_RET(0, 1);
 }
 

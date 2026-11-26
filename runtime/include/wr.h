@@ -301,6 +301,11 @@ extern int g_wr_trace_api;
 
 uint64_t wr_time_ns(void);       /* monotonic since start */
 uint32_t wr_time_ms(void);       /* GetTickCount / timeGetTime */
+/* Sleep for ns nanoseconds, as exactly as the host allows: nanosleep on POSIX; on Windows a
+ * high-resolution waitable timer (Windows 10 1803+, ~0.5 ms), else Sleep with a 1 ms timer period.
+ * 0 yields the rest of the time slice.
+ * Use this instead of nanosleep in frame pacing: Windows' nanosleep (winpthreads) is Sleep()-based. */
+void wr_sleep_ns(uint64_t ns);
 
 /* ---- process ---------------------------------------------------------------- */
 

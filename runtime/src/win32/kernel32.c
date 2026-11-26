@@ -593,12 +593,7 @@ WR_HANDLER(k_Sleep)
     (void)base;
     uint32_t ms = WR_ARG(0);
     wr_coop_run(ctx);
-#if defined(_WIN32)
-    Sleep(ms);
-#else
-    struct timespec ts = { (time_t)(ms / 1000u), (long)(ms % 1000u) * 1000000L };
-    nanosleep(&ts, NULL);
-#endif
+    wr_sleep_ns((uint64_t)ms * 1000000ull);   /* Windows: high-res timer, not the 15.6 ms tick; 0 yields */
     WR_RET(0, 1);
 }
 
