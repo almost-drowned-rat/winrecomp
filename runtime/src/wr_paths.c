@@ -209,39 +209,30 @@ int wr_path_resolve_write(const char *guest, char *host, size_t cap)
     return 1;
 }
 
-/* <root>/screenshots/<game>_YYYY-MM-DD_HH-MM-SS[_n].png (created on demand);
- * WR_SCREENSHOT_DIR overrides the folder. 1 on success. */
-int wr_screenshot_path(const char *game, char *out, size_t cap)
+/* F12 capture folder, as option-p: data/captures/<YYYYMMDD-HHMMSS>-frame<N>/
+ * (created; WR_CAPTURE_DIR overrides data/captures). 1 on success. */
+int wr_capture_dir(uint64_t frame, char *out, size_t cap)
 {
-    char dir[1100];
-    const char *e = getenv("WR_SCREENSHOT_DIR");
+    char base[1100];
+    const char *e = getenv("WR_CAPTURE_DIR");
     if (e && *e)
-        snprintf(dir, sizeof dir, "%s", e);
+        snprintf(base, sizeof base, "%s", e);
     else
-        snprintf(dir, sizeof dir, "%s/screenshots", g_wr_paths.root);
-#if defined(_WIN32)
-    _mkdir(dir);
-#else
-    mkdir(dir, 0755);
-#endif
+        snprintf(base, sizeof base, "%s/captures", g_wr_paths.data);
     time_t t = time(NULL);
     struct tm tm;
 #if defined(_WIN32)
     localtime_s(&tm, &t);
+    _mkdir(base);
 #else
     localtime_r(&t, &tm);
+    mkdir(base, 0755);
 #endif
-    char stamp[32];
-    strftime(stamp, sizeof stamp, "%Y-%m-%d_%H-%M-%S", &tm);
-    for (int n = 0; n < 100; n++) {
-        if (n)
-            snprintf(out, cap, "%s/%s_%s_%d.png", dir, game, stamp, n);
-        else
-            snprintf(out, cap, "%s/%s_%s.png", dir, game, stamp);
-        FILE *f = fopen(out, "rb");
-        if (!f)
-            return 1;
-        fclose(f);
-    }
-    return 0;
+    snprintf(out, cap, "%s/%04d%02d%02d-%02d%02d%02d-frame%llu", base, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+             tm.tm_hour, tm.tm_min, tm.tm_sec, (unsigned long long)frame);
+#if defined(_WIN32)
+    return _mkdir(out) == 0 || errno == EEXIST;
+#else
+    return mkdir(out, 0755) == 0 || errno == EEXIST;
+#endif
 }

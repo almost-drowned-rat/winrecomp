@@ -20,12 +20,10 @@ static PFN_vkGetInstanceProcAddr p_gipa;
 
 wr_vk g_vk;
 
-/* debug frame dump (wr_vk_dump_target) */
-static wr_vk_buffer g_dump_buf;
-static char g_dump_path[1024];
-static uint32_t g_dump_w, g_dump_h;
-static int g_dump_pending;
-static int g_dump_bgra;
+/* frame dumps (wr_vk_dump_target / _swap): up to two per frame (an F12
+ * capture writes the game picture and the shown one), written at frame end */
+#define DUMP_SLOTS 2
+static struct { wr_vk_buffer buf; char path[1024]; uint32_t w, h; int bgra, pending; } g_dump[DUMP_SLOTS];
 static void write_png(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h);
 static SDL_Window *g_win;
 
@@ -824,19 +822,22 @@ void wr_vk_frame_end(void)
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
         g_vk.need_recreate = 1;
     g_vk.in_frame = 0;
-    if (g_dump_pending) {
+    if (g_dump[0].pending || g_dump[1].pending)
         vkDeviceWaitIdle(g_vk.dev);
-        if (g_dump_bgra) {
-            uint8_t *p = (uint8_t *)g_dump_buf.map;
-            for (size_t i = 0; i < (size_t)g_dump_w * g_dump_h; i++) {
+    for (int d = 0; d < DUMP_SLOTS; d++) {
+        if (!g_dump[d].pending)
+            continue;
+        if (g_dump[d].bgra) {
+            uint8_t *p = (uint8_t *)g_dump[d].buf.map;
+            for (size_t i = 0; i < (size_t)g_dump[d].w * g_dump[d].h; i++) {
                 uint8_t tmp = p[4 * i];
                 p[4 * i] = p[4 * i + 2];
                 p[4 * i + 2] = tmp;
             }
         }
-        write_png(g_dump_path, (const uint8_t *)g_dump_buf.map, g_dump_w, g_dump_h);
-        wr_log("vulkan: frame written to %s", g_dump_path);
-        g_dump_pending = 0;
+        write_png(g_dump[d].path, (const uint8_t *)g_dump[d].buf.map, g_dump[d].w, g_dump[d].h);
+        wr_log("vulkan: frame written to %s", g_dump[d].path);
+        g_dump[d].pending = 0;
     }
     g_vk.frame = (g_vk.frame + 1) % WR_VK_FRAMES;
     /* the next slot's staging buffer is reusable once its fence passed:
@@ -944,11 +945,16 @@ static void dump_image(VkImage img, uint32_t w, uint32_t h, VkImageLayout layout
     struct { VkImage color; uint32_t w, h; } tt = { img, w, h }, *t = &tt;
     if (!g_vk.in_frame || g_vk.in_pass)
         return;
+    int d = 0;
+    while (d < DUMP_SLOTS && g_dump[d].pending)
+        d++;
+    if (d == DUMP_SLOTS)
+        return;   /* both slots taken this frame */
     VkDeviceSize need = (VkDeviceSize)t->w * t->h * 4;
-    if (g_dump_buf.size < need) {
+    if (g_dump[d].buf.size < need) {
         vkDeviceWaitIdle(g_vk.dev);
-        wr_vk_buffer_destroy(&g_dump_buf);
-        if (!wr_vk_buffer_create(&g_dump_buf, need, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1))
+        wr_vk_buffer_destroy(&g_dump[d].buf);
+        if (!wr_vk_buffer_create(&g_dump[d].buf, need, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1))
             return;
     }
     VkCommandBuffer cmd = g_vk.frames[g_vk.frame].cmd;
@@ -958,15 +964,15 @@ static void dump_image(VkImage img, uint32_t w, uint32_t h, VkImageLayout layout
     VkBufferImageCopy c = { 0 };
     c.imageSubresource = (VkImageSubresourceLayers){ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     c.imageExtent = (VkExtent3D){ t->w, t->h, 1 };
-    vkCmdCopyImageToBuffer(cmd, t->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_dump_buf.buf, 1, &c);
+    vkCmdCopyImageToBuffer(cmd, t->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_dump[d].buf.buf, 1, &c);
     barrier(cmd, t->color, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, layout,
             VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-    snprintf(g_dump_path, sizeof g_dump_path, "%s", path);
-    g_dump_w = t->w;
-    g_dump_h = t->h;
-    g_dump_bgra = bgra;
-    g_dump_pending = 1;
+    snprintf(g_dump[d].path, sizeof g_dump[d].path, "%s", path);
+    g_dump[d].w = t->w;
+    g_dump[d].h = t->h;
+    g_dump[d].bgra = bgra;
+    g_dump[d].pending = 1;
 }
 
 /* ---- offscreen targets ------------------------------------------------------------- */
