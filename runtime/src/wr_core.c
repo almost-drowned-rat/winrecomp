@@ -23,30 +23,226 @@
 #  include <unistd.h>
 #endif
 
-/* ---- logging ------------------------------------------------------------------ */
+/* ---- logging ------------------------------------------------------------------
+ * data/<name>.log (the port names it, wr_log_set_name; "log" otherwise), the
+ * run before kept as <name>.previous.log - after a crash and a restart the
+ * report is still there. A run of lines that differ only in their numbers
+ * keeps its first LOG_KEEP lines, then one summary line with the count and the
+ * last one. Crash and watchdog reports are written verbatim (their lines all
+ * look alike and every one matters). Whatever else prints to stdout / stderr
+ * (libraries, drivers) is captured into the log as well (POSIX; the terminal
+ * still shows everything). Every line is flushed: a crash loses nothing. */
+
+#define LOG_KEEP 3
+#define LOG_VERBATIM 400
 
 static FILE *g_logf;
+static char g_log_name[64] = "log";
+static char g_prev_key[1024], g_last_line[1100];
+static unsigned g_repeat, g_verbatim;
+static int g_term_fd = 2;       /* the real terminal (stderr before the capture) */
 int g_wr_trace_api;
+
+#if !defined(_WIN32)
+#include <pthread.h>
+static pthread_mutex_t g_log_mx = PTHREAD_MUTEX_INITIALIZER;
+/* try, never wait forever: a crash report may come while the lock is held */
+static void log_lock(void)
+{
+    for (int i = 0; i < 200000; i++)
+        if (pthread_mutex_trylock(&g_log_mx) == 0)
+            return;
+}
+#define LOG_LOCK() log_lock()
+#define LOG_UNLOCK() pthread_mutex_unlock(&g_log_mx)
+#else
+#define LOG_LOCK() ((void)0)
+#define LOG_UNLOCK() ((void)0)
+#endif
+
+void wr_log_set_name(const char *name)
+{
+    if (name && *name)
+        snprintf(g_log_name, sizeof g_log_name, "%s", name);
+}
+
+/* the line without its digits: lines alike but for numbers share it */
+static void log_key(const char *l, char *k, size_t cap)
+{
+    size_t n = 0;
+    for (; *l && n + 1 < cap; l++)
+        if (*l < '0' || *l > '9')
+            k[n++] = *l;
+    k[n] = 0;
+}
+
+static void log_flush_repeat(void)
+{
+    if (g_repeat > LOG_KEEP && g_logf)
+        fprintf(g_logf, "           ... %u more lines like this, the last: %s\n", g_repeat - LOG_KEEP, g_last_line);
+    g_repeat = 0;
+}
+
+/* one finished line into the file (lock held) */
+static void log_put(const char *line)
+{
+    if (!g_logf)
+        return;
+    if (strstr(line, "CRASH:") || strstr(line, "WATCHDOG:"))
+        g_verbatim = LOG_VERBATIM;
+    if (g_verbatim) {
+        g_verbatim--;
+        log_flush_repeat();
+        g_prev_key[0] = 0;
+        fprintf(g_logf, "%s\n", line);
+        fflush(g_logf);
+        return;
+    }
+    char key[1024];
+    log_key(line + (line[0] == '[' && strchr(line, ']') ? strchr(line, ']') - line + 1 : 0), key, sizeof key);
+    if (g_prev_key[0] && !strcmp(key, g_prev_key)) {
+        if (++g_repeat >= LOG_KEEP) {
+            snprintf(g_last_line, sizeof g_last_line, "%s", line);
+            return;
+        }
+    } else {
+        log_flush_repeat();
+        snprintf(g_prev_key, sizeof g_prev_key, "%s", key);
+    }
+    fprintf(g_logf, "%s\n", line);
+    fflush(g_logf);
+}
+
+#if !defined(_WIN32)
+/* stdout / stderr of everything else: a pipe, read by a thread, written as log lines */
+static int g_cap_r = -1;
+static void *log_capture(void *arg)
+{
+    (void)arg;
+    char buf[4096], line[1024];
+    size_t n = 0;
+    for (;;) {
+        ssize_t got = read(g_cap_r, buf, sizeof buf);
+        if (got <= 0)
+            break;
+        if (write(g_term_fd, buf, (size_t)got) < 0) { /* the terminal is gone: the log still gets it */ }
+        for (ssize_t i = 0; i < got; i++) {
+            if (buf[i] == '\n' || n + 1 >= sizeof line) {
+                line[n] = 0;
+                if (n && !(line[0] == '[' && strchr(line, ']'))) {   /* wr_log's own lines are in already */
+                    char out[1100];
+                    snprintf(out, sizeof out, "[%9.3f] (out) %s", (double)wr_time_ns() / 1e9, line);
+                    LOG_LOCK();
+                    log_put(out);
+                    LOG_UNLOCK();
+                }
+                n = 0;
+            } else
+                line[n++] = buf[i];
+        }
+    }
+    return NULL;
+}
+#endif
 
 void wr_log_init(void)
 {
-    char path[1200];
-    snprintf(path, sizeof path, "%s/%s", g_wr_paths.data, "log.txt");
+    char path[1200], prev[1200], old[1200];
+    snprintf(path, sizeof path, "%s/%s.log", g_wr_paths.data, g_log_name);
+    snprintf(prev, sizeof prev, "%s/%s.previous.log", g_wr_paths.data, g_log_name);
+    snprintf(old, sizeof old, "%s/log.txt", g_wr_paths.data);
+    if (strcmp(g_log_name, "log"))
+        remove(old);   /* the file name before 2026-11-26 */
+    remove(prev);
+    rename(path, prev);
     g_logf = fopen(path, "w");
     const char *t = getenv("WR_TRACE_API");
     g_wr_trace_api = t && *t && *t != '0';
+#if !defined(_WIN32)
+    int fds[2];
+    if (g_logf && pipe(fds) == 0) {
+        g_term_fd = dup(2);
+        if (g_term_fd < 0)
+            g_term_fd = 2;
+        fflush(stdout);
+        fflush(stderr);
+        dup2(fds[1], 1);
+        dup2(fds[1], 2);
+        close(fds[1]);
+        g_cap_r = fds[0];
+        setvbuf(stdout, NULL, _IOLBF, 0);
+        pthread_t th;
+        if (pthread_create(&th, NULL, log_capture, NULL) == 0)
+            pthread_detach(th);
+    }
+#endif
 }
 
 void wr_logv(const char *fmt, va_list ap)
 {
-    char buf[2048];
+    char buf[2048], line[2100];
     vsnprintf(buf, sizeof buf, fmt, ap);
     double t = (double)wr_time_ns() / 1e9;
-    fprintf(stderr, "[%9.3f] %s\n", t, buf);
-    if (g_logf) {
-        fprintf(g_logf, "[%9.3f] %s\n", t, buf);
-        fflush(g_logf);
+    int n = snprintf(line, sizeof line, "[%9.3f] %s", t, buf);
+    if (n > 0) {
+#if !defined(_WIN32)
+        if (write(g_term_fd, line, strlen(line)) < 0 || write(g_term_fd, "\n", 1) < 0) { /* no terminal */ }
+#else
+        fprintf(stderr, "%s\n", line);
+#endif
     }
+    LOG_LOCK();
+    log_put(line);
+    LOG_UNLOCK();
+}
+
+/* The log's head: who, what and where - the first thing to read in a report. */
+void wr_log_header(const char *title, const char *version)
+{
+    wr_log("%s %s", title, version ? version : "");
+    int sv = SDL_GetVersion();
+    wr_log("system: %s, SDL %d.%d.%d", SDL_GetPlatform(), SDL_VERSIONNUM_MAJOR(sv), SDL_VERSIONNUM_MINOR(sv),
+           SDL_VERSIONNUM_MICRO(sv));
+#if !defined(_WIN32)
+    FILE *f = fopen("/etc/os-release", "r");
+    if (f) {
+        char l[256];
+        while (fgets(l, sizeof l, f))
+            if (!strncmp(l, "PRETTY_NAME=", 12)) {
+                l[strcspn(l, "\n")] = 0;
+                wr_log("os: %s", l + 12);
+                break;
+            }
+        fclose(f);
+    }
+    f = fopen("/proc/sys/kernel/osrelease", "r");
+    if (f) {
+        char l[128];
+        if (fgets(l, sizeof l, f)) {
+            l[strcspn(l, "\n")] = 0;
+            wr_log("kernel: %s", l);
+        }
+        fclose(f);
+    }
+    f = fopen("/proc/cpuinfo", "r");
+    if (f) {
+        char l[256];
+        while (fgets(l, sizeof l, f))
+            if (!strncmp(l, "model name", 10) && strchr(l, ':')) {
+                l[strcspn(l, "\n")] = 0;
+                wr_log("cpu: %s, %d threads", strchr(l, ':') + 2, SDL_GetNumLogicalCPUCores());
+                break;
+            }
+        fclose(f);
+    }
+#else
+    wr_log("cpu: %d threads", SDL_GetNumLogicalCPUCores());
+#endif
+    wr_log("ram: %d MB", SDL_GetSystemRAM());
+    const char *de = getenv("XDG_CURRENT_DESKTOP"), *ses = getenv("XDG_SESSION_TYPE");
+    if (de || ses)
+        wr_log("desktop: %s (%s)", de ? de : "?", ses ? ses : "?");
+    wr_log("folder: %s", g_wr_paths.root);
 }
 
 void wr_log(const char *fmt, ...)

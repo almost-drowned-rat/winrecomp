@@ -356,9 +356,26 @@ int wr_vk_init(SDL_Window *window, int vsync)
     g_vk.phys = devs[best];
     vkGetPhysicalDeviceProperties(g_vk.phys, &g_vk.props);
     vkGetPhysicalDeviceMemoryProperties(g_vk.phys, &g_vk.memprops);
-    wr_log("vulkan: %s (API %u.%u.%u, driver 0x%X)", g_vk.props.deviceName,
-           VK_API_VERSION_MAJOR(g_vk.props.apiVersion), VK_API_VERSION_MINOR(g_vk.props.apiVersion),
-           VK_API_VERSION_PATCH(g_vk.props.apiVersion), g_vk.props.driverVersion);
+    {   /* the GPU line of the log: device, API, the driver by name and version */
+        uint32_t dv = g_vk.props.driverVersion;
+        char ver[48];
+        if (g_vk.props.vendorID == 0x10DE)   /* NVIDIA packs 10.8.8.6 bits */
+            snprintf(ver, sizeof ver, "%u.%u.%u", dv >> 22, (dv >> 14) & 0xFF, (dv >> 6) & 0xFF);
+        else
+            snprintf(ver, sizeof ver, "%u.%u.%u", VK_API_VERSION_MAJOR(dv), VK_API_VERSION_MINOR(dv),
+                     VK_API_VERSION_PATCH(dv));
+        char drv[2 * VK_MAX_DRIVER_NAME_SIZE + 4] = "";
+        if (g_vk.props.apiVersion >= VK_API_VERSION_1_2 && vkGetPhysicalDeviceProperties2) {
+            VkPhysicalDeviceDriverProperties dp = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES };
+            VkPhysicalDeviceProperties2 p2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &dp, { 0 } };
+            vkGetPhysicalDeviceProperties2(g_vk.phys, &p2);
+            snprintf(drv, sizeof drv, "%s %s", dp.driverName, dp.driverInfo);
+        }
+        wr_log("vulkan: %s (vendor 0x%04X device 0x%04X), API %u.%u.%u, driver %s%s%s%s", g_vk.props.deviceName,
+               g_vk.props.vendorID, g_vk.props.deviceID, VK_API_VERSION_MAJOR(g_vk.props.apiVersion),
+               VK_API_VERSION_MINOR(g_vk.props.apiVersion), VK_API_VERSION_PATCH(g_vk.props.apiVersion), ver,
+               drv[0] ? " (" : "", drv, drv[0] ? ")" : "");
+    }
 
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qi = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };

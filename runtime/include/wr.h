@@ -277,7 +277,9 @@ int  wr_path_ci(const char *dir, const char *rel, char *host, size_t cap);
 
 /* ---- logging ------------------------------------------------------------------ */
 
+void wr_log_set_name(const char *name);   /* before wr_log_init: data/<name>.log (+ <name>.previous.log) */
 void wr_log_init(void);
+void wr_log_header(const char *title, const char *version);   /* version, system, cpu, ram, folder */
 /* Fatal signal / exception report into the log. */
 void wr_crash_init(void);
 void wr_log(const char *fmt, ...);
