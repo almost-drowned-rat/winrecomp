@@ -2561,8 +2561,11 @@ class FunctionTranslator:
         """C statements for one hook at the start of its block."""
         name = hook["call"]
         tag = f"/* hook 0x{hook['at']:08X}{' after' if hook['after'] else ''} */"
+        # winrecomp: hooks get the register set like every guest function
+        # (option C has no global registers), so they can read and change
+        # eax.., esp and guest memory.
         if hook["on_true"] is None and hook["on_false"] is None:
-            return [f"    {{ extern void {name}(void); {name}(); }} {tag}"]
+            return [f"    {{ extern void {name}(RECOMP_PARAMS); {name}(ctx, base); }} {tag}"]
 
         def leave(v):
             if v == "ret":
@@ -2573,7 +2576,7 @@ class FunctionTranslator:
                 n = int(next(iter(rets)) or "0", 0)
                 return f"esp += {4 + n}; return;"
             return f"goto loc_{v:08X};"
-        s = f"    {{ extern int {name}(void); int hook_ = {name}();"
+        s = f"    {{ extern int {name}(RECOMP_PARAMS); int hook_ = {name}(ctx, base);"
         if hook["on_true"] is not None:
             s += f" if (hook_) {{ {leave(hook['on_true'])} }}"
         if hook["on_false"] is not None:

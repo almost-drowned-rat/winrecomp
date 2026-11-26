@@ -9,7 +9,7 @@ functions.
 
     [[hook]]
     at = 0x0012ABCD        # guest instruction inside a recompiled function
-    call = "thps_fix"      # void thps_fix(void), or int thps_fix(void) with on_true/on_false
+    call = "thps_fix"      # void thps_fix(RECOMP_PARAMS) (winrecomp: gets the registers), or int ... with on_true/on_false
     after = false          # true: after the instruction (not after a jump or ret)
     on_true = "ret"        # the hook returned nonzero: return as the function's ret does
     on_false = 0x0012AC00  # ... or zero: go to that instruction of the same function
