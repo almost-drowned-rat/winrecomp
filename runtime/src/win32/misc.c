@@ -121,6 +121,21 @@ int wr_reg_get_dword(const char *key, const char *name, uint32_t *out)
     return 1;
 }
 
+void w32_registry_save(void);
+
+/* Port hook: set a DWORD value (RECOMP OPTIONS that live in the game's own
+ * registry settings) and write the file at once. */
+void wr_reg_set_dword(const char *key, const char *name, uint32_t value)
+{
+    w32_registry_load();
+    rval *v = val_find(key_find(key, 1), name, 1);
+    if (v->data && v->type == 4 && v->len == 4 && !memcmp(v->data, &value, 4))
+        return;
+    val_set(v, 4, &value, 4);
+    g_reg_dirty = 1;
+    w32_registry_save();
+}
+
 void wr_reg_default_dword(const char *key, const char *name, uint32_t value)
 {
     wr_reg_default(key, name, 4, &value, 4);
