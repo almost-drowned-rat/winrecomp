@@ -278,6 +278,8 @@ extern char g_wr_cwd[512];
 int  wr_path_ci(const char *dir, const char *rel, char *host, size_t cap);
 /* A folder read after saves/ and before game/ (up to 4). */
 void wr_path_add_read_dir(const char *dir);
+/* the port may read another file in place of one: rel path in ('/'), a replacement or NULL */
+extern const char *(*g_wr_read_map)(const char *rel);
 
 /* ---- logging ------------------------------------------------------------------ */
 

@@ -192,11 +192,19 @@ void wr_path_add_read_dir(const char *dir)
         snprintf(g_read_dirs[g_nread_dirs++], sizeof g_read_dirs[0], "%s", dir);
 }
 
+/* the port may read another file in place of one (tests, e.g. GTA 2's radio station check) */
+const char *(*g_wr_read_map)(const char *rel);
+
 int wr_path_resolve_read(const char *guest, char *host, size_t cap)
 {
     char rel[1024];
     if (!wr_path_relative(guest, rel, sizeof rel))
         return 0;
+    if (g_wr_read_map) {
+        const char *m = g_wr_read_map(rel);
+        if (m)
+            snprintf(rel, sizeof rel, "%s", m);
+    }
     if (wr_path_ci(g_wr_paths.saves, rel, host, cap))
         return 1;
     for (int i = 0; i < g_nread_dirs; i++)
