@@ -203,6 +203,7 @@ const char *wr_settings_get(const char *key, const char *def);
 int  wr_settings_get_int(const char *key, int def);
 void wr_settings_set(const char *key, const char *value);   /* writes at once */
 void wr_settings_set_int(const char *key, int value);
+const char *wr_settings_key_at(int i);   /* the i-th key in the file, NULL past the end */
 
 /* Registry values set by the port (win32/misc.c; saves/registry.txt, written at once) */
 void wr_reg_set_dword(const char *key, const char *name, uint32_t value);

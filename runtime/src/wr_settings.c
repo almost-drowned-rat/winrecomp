@@ -20,7 +20,7 @@
 #include <unistd.h>
 #endif
 
-#define MAX_LINES 256
+#define MAX_LINES 4096   /* per-preset shader parameters add lines */
 #define LINE_MAX_LEN 512
 
 static char g_path[1100];
@@ -151,4 +151,31 @@ void wr_settings_set_int(const char *key, int value)
     char v[16];
     snprintf(v, sizeof v, "%d", value);
     wr_settings_set(key, v);
+}
+
+/* The key of line i (lines without "key=" are skipped), NULL past the end:
+ * to walk the file (per-preset values and the like). */
+const char *wr_settings_key_at(int i)
+{
+    static char key[LINE_MAX_LEN];
+    int n = 0;
+    for (int l = 0; l < g_n; l++) {
+        const char *t = g_line[l];
+        while (*t == ' ' || *t == '\t')
+            t++;
+        const char *eq = strchr(t, '=');
+        if (!eq || *t == '#' || *t == ';' || eq == t)
+            continue;
+        if (n++ == i) {
+            size_t k = (size_t)(eq - t);
+            while (k && (t[k - 1] == ' ' || t[k - 1] == '\t'))
+                k--;
+            if (k >= sizeof key)
+                k = sizeof key - 1;
+            memcpy(key, t, k);
+            key[k] = 0;
+            return key;
+        }
+    }
+    return NULL;
 }
