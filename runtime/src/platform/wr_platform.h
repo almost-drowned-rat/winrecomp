@@ -2,6 +2,7 @@
 #ifndef WR_PLATFORM_H
 #define WR_PLATFORM_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -36,6 +37,11 @@ void wr_pad_dik(uint8_t st[256]);
 int  wr_pad_stick(float *x, float *y);
 /* d-pad of the first pad as a direction (-1/0/1, y down); 1 while pressed */
 int  wr_pad_dpad(int *x, int *y);
+/* rebinding: held controls (bit per WR_PAD_*), their names; the keyboard alone */
+uint64_t    wr_pad_controls(void);
+const char *wr_pad_control_name(int c);
+void wr_keys_keyboard_dik(uint8_t out[256]);
+void wr_key_name(uint8_t dik, char *out, size_t cap);
 int  wr_pad_count(void);
 
 /* Scripted test input (WR_INPUT). */

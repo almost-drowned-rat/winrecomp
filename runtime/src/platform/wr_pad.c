@@ -165,3 +165,47 @@ int wr_pad_dpad(int *x, int *y)
         }
     return 0;
 }
+
+/* Bit c set for every control c held on any pad (same thresholds as the
+ * key mapping): for "press a button" rebinding. */
+uint64_t wr_pad_controls(void)
+{
+    uint64_t m = 0;
+    for (int k = 0; k < 4; k++) {
+        SDL_Gamepad *p = g_pads[k];
+        if (!p)
+            continue;
+        for (int c = 0; c < WR_PAD_N; c++) {
+            if (c > WR_PAD_DPAD_RIGHT && c < WR_PAD_LEFT_STICK_LEFT)
+                continue;
+            int on;
+            switch (c) {
+            case WR_PAD_LEFT_STICK_LEFT:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTX) < -16000; break;
+            case WR_PAD_LEFT_STICK_RIGHT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTX) > 16000; break;
+            case WR_PAD_LEFT_STICK_UP:    on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTY) < -16000; break;
+            case WR_PAD_LEFT_STICK_DOWN:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTY) > 16000; break;
+            case WR_PAD_LT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000; break;
+            case WR_PAD_RT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000; break;
+            default: on = SDL_GetGamepadButton(p, (SDL_GamepadButton)c); break;
+            }
+            if (on)
+                m |= 1ull << c;
+        }
+    }
+    return m;
+}
+
+/* Names in the Xbox layout (positions, as SDL reports them) */
+const char *wr_pad_control_name(int c)
+{
+    static const char *const n[WR_PAD_N] = {
+        [WR_PAD_SOUTH] = "A", [WR_PAD_EAST] = "B", [WR_PAD_WEST] = "X", [WR_PAD_NORTH] = "Y",
+        [WR_PAD_BACK] = "SELECT", [WR_PAD_GUIDE] = "HOME", [WR_PAD_START] = "START", [WR_PAD_LSTICK] = "L3",
+        [WR_PAD_RSTICK] = "R3", [WR_PAD_LB] = "LB", [WR_PAD_RB] = "RB", [WR_PAD_DPAD_UP] = "D-PAD UP",
+        [WR_PAD_DPAD_DOWN] = "D-PAD DOWN", [WR_PAD_DPAD_LEFT] = "D-PAD LEFT", [WR_PAD_DPAD_RIGHT] = "D-PAD RIGHT",
+        [WR_PAD_LEFT_STICK_LEFT] = "STICK LEFT", [WR_PAD_LEFT_STICK_RIGHT] = "STICK RIGHT",
+        [WR_PAD_LEFT_STICK_UP] = "STICK UP", [WR_PAD_LEFT_STICK_DOWN] = "STICK DOWN", [WR_PAD_LT] = "LT",
+        [WR_PAD_RT] = "RT",
+    };
+    return c >= 0 && c < WR_PAD_N && n[c] ? n[c] : "-";
+}

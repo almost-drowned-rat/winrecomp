@@ -5,6 +5,8 @@
 #include "wr_platform.h"
 
 #include <SDL3/SDL.h>
+#include <stdio.h>
+#include <ctype.h>
 
 typedef struct keymap { int sdl; uint8_t vk; uint8_t dik; } keymap;
 
@@ -93,4 +95,36 @@ int wr_key_vk_down(uint8_t vk)
         if (k_keys[i].vk == vk && k_keys[i].sdl < n && st[k_keys[i].sdl])
             return 1;
     return 0;
+}
+
+/* The keyboard only (and the input script, which plays a keyboard; no
+ * pads): for "press a key" rebinding. */
+void wr_keys_keyboard_dik(uint8_t out[256])
+{
+    int n = 0;
+    for (int i = 0; i < 256; i++)
+        out[i] = 0;
+    wr_input_script_dik(out);
+    const bool *st = SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetKeyboardState(&n) : NULL;
+    if (!st)
+        return;
+    for (size_t i = 0; i < sizeof k_keys / sizeof k_keys[0]; i++)
+        if (k_keys[i].sdl < n && st[k_keys[i].sdl])
+            out[k_keys[i].dik] = 0x80;
+}
+
+/* An upper-case name for a DirectInput key code ("LEFT CTRL", "Z"), "?" if unknown. */
+void wr_key_name(uint8_t dik, char *out, size_t cap)
+{
+    for (size_t i = 0; i < sizeof k_keys / sizeof k_keys[0]; i++)
+        if (k_keys[i].dik == dik) {
+            const char *n = SDL_GetScancodeName((SDL_Scancode)k_keys[i].sdl);
+            size_t j = 0;
+            for (; n && n[j] && j + 1 < cap; j++)
+                out[j] = (char)toupper((unsigned char)n[j]);
+            out[j] = 0;
+            if (j)
+                return;
+        }
+    snprintf(out, cap, "?");
 }
