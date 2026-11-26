@@ -276,6 +276,8 @@ int  wr_path_relative(const char *guest, char *rel, size_t cap);
 extern char g_wr_cwd[512];
 /* Case-insensitive host lookup of rel below dir; 1 if found. */
 int  wr_path_ci(const char *dir, const char *rel, char *host, size_t cap);
+/* A folder read after saves/ and before game/ (up to 4). */
+void wr_path_add_read_dir(const char *dir);
 
 /* ---- logging ------------------------------------------------------------------ */
 

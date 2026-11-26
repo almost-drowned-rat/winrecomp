@@ -181,6 +181,17 @@ int wr_path_ci(const char *dir, const char *rel, char *host, size_t cap)
     return 1;
 }
 
+/* Folders read between saves/ and game/ (the port's own files that stand in
+ * for or add to the game's, e.g. translations unpacked into data/). */
+static char g_read_dirs[4][1024];
+static int g_nread_dirs;
+
+void wr_path_add_read_dir(const char *dir)
+{
+    if (g_nread_dirs < 4 && dir && *dir)
+        snprintf(g_read_dirs[g_nread_dirs++], sizeof g_read_dirs[0], "%s", dir);
+}
+
 int wr_path_resolve_read(const char *guest, char *host, size_t cap)
 {
     char rel[1024];
@@ -188,6 +199,9 @@ int wr_path_resolve_read(const char *guest, char *host, size_t cap)
         return 0;
     if (wr_path_ci(g_wr_paths.saves, rel, host, cap))
         return 1;
+    for (int i = 0; i < g_nread_dirs; i++)
+        if (wr_path_ci(g_read_dirs[i], rel, host, cap))
+            return 1;
     return wr_path_ci(g_wr_paths.game, rel, host, cap);
 }
 
