@@ -215,6 +215,7 @@ static uint32_t key_lparam(uint8_t dik, int up, int repeat)
 extern volatile uint32_t wr_heartbeat;
 
 int g_wr_screenshot_request;
+int g_wr_mouse_wheel;   /* wheel steps since a port last cleared it */
 
 static void script_key(uint8_t vk, uint8_t dik, int up)
 {
@@ -288,6 +289,9 @@ void w32_pump_events(X86Ctx *ctx)
             post(hwnd, msg, vk, key_lparam(dik, up, e.key.repeat), chr);
             break;
         }
+        case SDL_EVENT_MOUSE_WHEEL:
+            g_wr_mouse_wheel += (int)e.wheel.y;   /* ports read and clear it */
+            break;
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
             if (hwnd) {
                 post(hwnd, WM_ACTIVATEAPP, 1, 0, 0);

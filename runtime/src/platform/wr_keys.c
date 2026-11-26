@@ -83,9 +83,13 @@ void wr_keys_dik_state(uint8_t out[256])
     if (!st)
         return;
     for (size_t i = 0; i < sizeof k_keys / sizeof k_keys[0]; i++)
-        if (k_keys[i].sdl < n && st[k_keys[i].sdl])
+        if (k_keys[i].sdl < n && st[k_keys[i].sdl] && !wr_pad_keyboard_takes(k_keys[i].sdl))
             out[k_keys[i].dik] = 0x80;
+    if (g_wr_dik_hook)
+        g_wr_dik_hook(out);   /* the port's own remapping (e.g. a modern keyboard layout) */
 }
+
+wr_dik_hook_fn g_wr_dik_hook;
 
 int wr_key_vk_down(uint8_t vk)
 {

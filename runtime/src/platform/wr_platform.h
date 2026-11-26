@@ -14,6 +14,14 @@ struct SDL_Window;
 /* Keyboard: SDL scancode -> Windows VK + set-1 scan code (DIK). */
 int  wr_key_from_sdl(int sdl_scancode, uint8_t *vk, uint8_t *dik);
 void wr_keys_dik_state(uint8_t out[256]);
+/* the port may change the key state the game sees (last step of wr_keys_dik_state) */
+typedef void (*wr_dik_hook_fn)(uint8_t st[256]);
+extern wr_dik_hook_fn g_wr_dik_hook;
+/* the keyboard as a controller (option-c layout): its keys then count as pad controls */
+void wr_pad_keyboard_as_pad(int on);
+int  wr_pad_keyboard_is_pad(void);
+int  wr_pad_keyboard_takes(int sdl_scancode);
+extern int g_wr_mouse_wheel;   /* mouse wheel steps (up +), a port clears it */
 int  wr_key_vk_down(uint8_t vk);
 
 /* Game controllers -> virtual keys. Controls 0..14 are SDL gamepad buttons

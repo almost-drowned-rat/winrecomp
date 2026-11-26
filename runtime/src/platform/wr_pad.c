@@ -16,6 +16,50 @@
 #include <string.h>
 
 static SDL_Gamepad *g_pads[4];
+/* The keyboard as a controller (option-c's layout; a port turns it on):
+ * WASD left stick, arrows d-pad, Enter START, Backspace BACK, I/J/K/L =
+ * Y/X/A/B, U/O = LB/RB, Z/P = LT/RT. Those keys then reach the game only
+ * through the pad mapping (wr_keys_dik_state leaves them out). */
+static int g_kb_pad;
+static const struct { int sc, ctl; } k_kb_pad[] = {
+    { SDL_SCANCODE_W, WR_PAD_LEFT_STICK_UP }, { SDL_SCANCODE_S, WR_PAD_LEFT_STICK_DOWN },
+    { SDL_SCANCODE_A, WR_PAD_LEFT_STICK_LEFT }, { SDL_SCANCODE_D, WR_PAD_LEFT_STICK_RIGHT },
+    { SDL_SCANCODE_UP, WR_PAD_DPAD_UP }, { SDL_SCANCODE_DOWN, WR_PAD_DPAD_DOWN },
+    { SDL_SCANCODE_LEFT, WR_PAD_DPAD_LEFT }, { SDL_SCANCODE_RIGHT, WR_PAD_DPAD_RIGHT },
+    { SDL_SCANCODE_RETURN, WR_PAD_START }, { SDL_SCANCODE_KP_ENTER, WR_PAD_START },
+    { SDL_SCANCODE_BACKSPACE, WR_PAD_BACK },
+    { SDL_SCANCODE_I, WR_PAD_NORTH }, { SDL_SCANCODE_J, WR_PAD_WEST }, { SDL_SCANCODE_K, WR_PAD_SOUTH },
+    { SDL_SCANCODE_L, WR_PAD_EAST }, { SDL_SCANCODE_U, WR_PAD_LB }, { SDL_SCANCODE_O, WR_PAD_RB },
+    { SDL_SCANCODE_Z, WR_PAD_LT }, { SDL_SCANCODE_P, WR_PAD_RT },
+};
+
+void wr_pad_keyboard_as_pad(int on) { g_kb_pad = on != 0; }
+int wr_pad_keyboard_is_pad(void) { return g_kb_pad; }
+
+/* 1 if SDL scancode sc is one of the keys the keyboard pad takes */
+int wr_pad_keyboard_takes(int sc)
+{
+    if (!g_kb_pad)
+        return 0;
+    for (size_t i = 0; i < sizeof k_kb_pad / sizeof k_kb_pad[0]; i++)
+        if (k_kb_pad[i].sc == sc)
+            return 1;
+    return 0;
+}
+
+static uint64_t kb_pad_mask(void)
+{
+    if (!g_kb_pad || !SDL_WasInit(SDL_INIT_VIDEO))
+        return 0;
+    int n = 0;
+    const bool *st = SDL_GetKeyboardState(&n);
+    uint64_t m = 0;
+    for (size_t i = 0; i < sizeof k_kb_pad / sizeof k_kb_pad[0]; i++)
+        if (k_kb_pad[i].sc < n && st[k_kb_pad[i].sc])
+            m |= 1ull << k_kb_pad[i].ctl;
+    return m;
+}
+
 static wr_pad_map_fn g_map;
 static uint8_t g_down[256];        /* virtual DIK state from pads */
 static int g_inited;
@@ -83,6 +127,15 @@ void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up))
     uint8_t now[256];
     uint64_t ctl_now[4] = { 0, 0, 0, 0 };
     memset(now, 0, sizeof now);
+    {   /* the keyboard as a controller */
+        uint64_t km = kb_pad_mask();
+        for (int c = 0; km && c < WR_PAD_N; c++)
+            if (km >> c & 1) {
+                uint8_t dik = g_map(c);
+                if (dik)
+                    now[dik] = 0x80;
+            }
+    }
     for (int k = 0; k < 4; k++) {
         SDL_Gamepad *p = g_pads[k];
         if (!p)
@@ -146,13 +199,25 @@ int wr_pad_stick(float *x, float *y)
     const char *f = getenv("WR_FAKE_STICK");
     if (f && *f && sscanf(f, "%f,%f", x, y) == 2)
         return 1;
+    int have = 0;
     for (int k = 0; k < 4; k++)
         if (g_pads[k]) {
             *x = SDL_GetGamepadAxis(g_pads[k], SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
             *y = SDL_GetGamepadAxis(g_pads[k], SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+            have = 1;
+            break;
+        }
+    uint64_t km = kb_pad_mask();   /* WASD as a full push when the real stick rests */
+    if (km && *x * *x + *y * *y < 0.09f) {
+        float kx = (float)((int)(km >> WR_PAD_LEFT_STICK_RIGHT & 1) - (int)(km >> WR_PAD_LEFT_STICK_LEFT & 1));
+        float ky = (float)((int)(km >> WR_PAD_LEFT_STICK_DOWN & 1) - (int)(km >> WR_PAD_LEFT_STICK_UP & 1));
+        if (kx || ky) {
+            *x = kx;
+            *y = ky;
             return 1;
         }
-    return 0;
+    }
+    return have;
 }
 
 /* The d-pad of the first connected pad as a direction, -1/0/1 each (x right,
@@ -160,6 +225,13 @@ int wr_pad_stick(float *x, float *y)
 int wr_pad_dpad(int *x, int *y)
 {
     *x = *y = 0;
+    uint64_t km = kb_pad_mask();
+    if (km & (0xFull << WR_PAD_DPAD_UP)) {
+        *x = (int)(km >> WR_PAD_DPAD_RIGHT & 1) - (int)(km >> WR_PAD_DPAD_LEFT & 1);
+        *y = (int)(km >> WR_PAD_DPAD_DOWN & 1) - (int)(km >> WR_PAD_DPAD_UP & 1);
+        if (*x || *y)
+            return 1;
+    }
     for (int k = 0; k < 4; k++)
         if (g_pads[k]) {
             SDL_Gamepad *p = g_pads[k];
@@ -174,7 +246,7 @@ int wr_pad_dpad(int *x, int *y)
  * key mapping): for "press a button" rebinding. */
 uint64_t wr_pad_controls(void)
 {
-    uint64_t m = 0;
+    uint64_t m = kb_pad_mask();
     for (int k = 0; k < 4; k++) {
         SDL_Gamepad *p = g_pads[k];
         if (!p)
