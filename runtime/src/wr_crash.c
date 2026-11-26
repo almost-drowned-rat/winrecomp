@@ -20,6 +20,28 @@
 #elif defined(__GLIBC__)
 #  include <dlfcn.h>
 #  include <execinfo.h>
+#elif defined(__ANDROID__)
+#  include <dlfcn.h>
+#  include <unwind.h>
+#endif
+
+#if defined(__ANDROID__)
+/* bionic has no backtrace(): walk the stack with the unwinder (it steps through the signal frame) */
+struct bt_state { void **frames; int n, max; };
+static _Unwind_Reason_Code bt_step(struct _Unwind_Context *ctx, void *arg)
+{
+    struct bt_state *st = arg;
+    uintptr_t pc = _Unwind_GetIP(ctx);
+    if (pc && st->n < st->max)
+        st->frames[st->n++] = (void *)pc;
+    return st->n < st->max ? _URC_NO_REASON : _URC_END_OF_STACK;
+}
+static int backtrace(void **frames, int max)
+{
+    struct bt_state st = { frames, 0, max };
+    _Unwind_Backtrace(bt_step, &st);
+    return st.n;
+}
 #endif
 
 void wr_icall_trace_dump(void);
@@ -45,13 +67,17 @@ static void report(const char *what, uintptr_t fault)
         wr_log("guest stack:%s", line);
     }
     wr_icall_trace_dump();
-#if defined(__GLIBC__)
+#if defined(__GLIBC__) || defined(__ANDROID__)
     void *frames[48];
     int n = backtrace(frames, 48);
     for (int i = 0; i < n; i++) {
         Dl_info info;
+        memset(&info, 0, sizeof info);
         if (dladdr(frames[i], &info) && info.dli_sname)
             wr_log("  #%02d %s+0x%lx", i, info.dli_sname, (unsigned long)((uintptr_t)frames[i] - (uintptr_t)info.dli_saddr));
+        else if (info.dli_fname)   /* no symbol: library + offset (llvm-addr2line / llvm-nm on the .so) */
+            wr_log("  #%02d %s+0x%lx", i, strrchr(info.dli_fname, '/') ? strrchr(info.dli_fname, '/') + 1 : info.dli_fname,
+                   (unsigned long)((uintptr_t)frames[i] - (uintptr_t)info.dli_fbase));
         else
             wr_log("  #%02d %p", i, frames[i]);
     }
@@ -167,6 +193,12 @@ void wr_crash_init(void)
     if (secs > 0) {
         g_main_thread = pthread_self();
         signal(SIGUSR1, on_usr1);
+        /* Android: threads started from Java block SIGUSR1 (ART's signal catcher takes it), so the
+         * watchdog's signal stayed pending and a hang wrote nothing - unblock it on this thread */
+        sigset_t us;
+        sigemptyset(&us);
+        sigaddset(&us, SIGUSR1);
+        pthread_sigmask(SIG_UNBLOCK, &us, NULL);
         pthread_t t;
         if (pthread_create(&t, NULL, watchdog, (void *)(intptr_t)secs) == 0)
             pthread_detach(t);
