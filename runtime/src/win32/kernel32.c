@@ -591,6 +591,7 @@ WR_HANDLER(k_Sleep)
 {
     (void)base;
     uint32_t ms = WR_ARG(0);
+    wr_coop_run(ctx);
 #if defined(_WIN32)
     Sleep(ms);
 #else
@@ -1236,12 +1237,54 @@ WR_HANDLER(k_SetErrorMode) { (void)base; WR_RET(0, 1); }
 WR_HANDLER(k_GetVersion) { (void)base; WR_RET(0x0A280105u, 0); }   /* 5.1 build 2600 (XP), NT */
 WR_HANDLER(k_DisableThreadLibraryCalls) { (void)base; WR_RET(1, 1); }
 
-/* Guest threads are not supported (one guest thread). Callers that check the
- * result fall back to working synchronously (Bink's background reader). */
+/* ---- cooperative threads ---------------------------------------------------------------- */
+
+#define MAX_COOP 8
+static struct { wr_coop_step_fn step; uint32_t param; uint64_t due_ns; } g_coop[MAX_COOP];
+static wr_thread_hook_fn g_thread_hook;
+static int g_coop_busy;
+
+void wr_set_thread_hook(wr_thread_hook_fn hook) { g_thread_hook = hook; }
+
+void wr_coop_run(X86Ctx *ctx)
+{
+    if (g_coop_busy)
+        return;         /* a step that sleeps does not re-enter */
+    g_coop_busy = 1;
+    uint64_t now = wr_time_ns();
+    for (int i = 0; i < MAX_COOP; i++) {
+        if (!g_coop[i].step || now < g_coop[i].due_ns)
+            continue;
+        int ms = g_coop[i].step(ctx, g_coop[i].param);
+        if (ms < 0)
+            g_coop[i].step = NULL;
+        else
+            g_coop[i].due_ns = now + (uint64_t)ms * 1000000ull;
+    }
+    g_coop_busy = 0;
+}
+
+/* Real guest threads are not supported (one guest thread). A thread the port
+ * knows becomes a cooperative one; others are refused - callers that check
+ * the result fall back to working synchronously. */
 WR_HANDLER(k_CreateThread)
 {
     (void)base;
-    wr_log("CreateThread(start 0x%08X): guest threads not supported, refused", WR_ARG(2));
+    uint32_t start = WR_ARG(2), param = WR_ARG(3), ptid = WR_ARG(5);
+    wr_coop_step_fn step = g_thread_hook ? g_thread_hook(ctx, start, param) : NULL;
+    if (step) {
+        for (int i = 0; i < MAX_COOP; i++)
+            if (!g_coop[i].step) {
+                g_coop[i].step = step;
+                g_coop[i].param = param;
+                g_coop[i].due_ns = 0;
+                if (ptid)
+                    wr_wr32(ptid, 0x200u + (uint32_t)i);
+                wr_log("CreateThread(start 0x%08X): runs cooperatively", start);
+                WR_RET(wr_handle_new(WR_H_OTHER, NULL, NULL), 6);
+            }
+    }
+    wr_log("CreateThread(start 0x%08X): guest threads not supported, refused", start);
     WR_SETERR(8);
     WR_RET(0, 6);
 }

@@ -234,8 +234,8 @@ uint32_t wr_heap_top(void);
 
 void w32_pump_events(X86Ctx *ctx)
 {
-    (void)ctx;
     wr_heartbeat++;
+    wr_coop_run(ctx);
     {   /* heap high-water mark, logged when it grows by 16 MB */
         static uint32_t mark;
         uint32_t top = wr_heap_top();

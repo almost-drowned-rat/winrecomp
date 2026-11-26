@@ -19,6 +19,7 @@ add_library(winrecomp_rt STATIC
     src/win32/dinput8.c
     src/win32/misc.c
     src/libs/miles_bink_silent.c
+    src/libs/miles.c
     src/vk/wr_vk.c
     src/audio/wr_audio.c
     src/vk/wr_vk_blit.c

@@ -167,6 +167,17 @@ void wr_pe_attach_dlls(X86Ctx *ctx);
  * is the first). The guest's own epilogue pops what its convention says;
  * the stack pointer is restored either way. Returns eax. */
 uint32_t wr_call_guest(X86Ctx *ctx, uint32_t va, int n, const uint32_t *args);
+
+/* Cooperative guest threads. There is one guest thread; a port can take over
+ * a CreateThread whose start routine it knows and run that thread's loop as
+ * steps instead. A step runs on the guest thread from Sleep and the message
+ * pump (points where a real thread could have run too) and returns the ms
+ * until it wants to run again, or < 0 when the thread has ended. */
+typedef int (*wr_coop_step_fn)(X86Ctx *ctx, uint32_t param);
+/* return a step function for (start, param), or NULL to refuse the thread */
+typedef wr_coop_step_fn (*wr_thread_hook_fn)(X86Ctx *ctx, uint32_t start, uint32_t param);
+void wr_set_thread_hook(wr_thread_hook_fn hook);
+void wr_coop_run(X86Ctx *ctx);
 #define WR_CALL_RET_VA 0xFEFFFFF0u
 
 /* ---- handler helpers ------------------------------------------------------ */
