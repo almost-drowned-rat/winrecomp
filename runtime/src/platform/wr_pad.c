@@ -98,6 +98,10 @@ void wr_pad_tick(void (*post_key)(uint8_t vk, uint8_t dik, int up))
             case WR_PAD_LEFT_STICK_DOWN:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTY) > 16000; break;
             case WR_PAD_LT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000; break;
             case WR_PAD_RT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000; break;
+            case WR_PAD_RIGHT_STICK_LEFT:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTX) < -16000; break;
+            case WR_PAD_RIGHT_STICK_RIGHT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTX) > 16000; break;
+            case WR_PAD_RIGHT_STICK_UP:    on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTY) < -16000; break;
+            case WR_PAD_RIGHT_STICK_DOWN:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTY) > 16000; break;
             default: on = SDL_GetGamepadButton(p, (SDL_GamepadButton)c); break;
             }
             if (!on)
@@ -186,6 +190,10 @@ uint64_t wr_pad_controls(void)
             case WR_PAD_LEFT_STICK_DOWN:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTY) > 16000; break;
             case WR_PAD_LT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 12000; break;
             case WR_PAD_RT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 12000; break;
+            case WR_PAD_RIGHT_STICK_LEFT:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTX) < -16000; break;
+            case WR_PAD_RIGHT_STICK_RIGHT: on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTX) > 16000; break;
+            case WR_PAD_RIGHT_STICK_UP:    on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTY) < -16000; break;
+            case WR_PAD_RIGHT_STICK_DOWN:  on = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_RIGHTY) > 16000; break;
             default: on = SDL_GetGamepadButton(p, (SDL_GamepadButton)c); break;
             }
             if (on)
@@ -205,7 +213,8 @@ const char *wr_pad_control_name(int c)
         [WR_PAD_DPAD_DOWN] = "D-PAD DOWN", [WR_PAD_DPAD_LEFT] = "D-PAD LEFT", [WR_PAD_DPAD_RIGHT] = "D-PAD RIGHT",
         [WR_PAD_LEFT_STICK_LEFT] = "STICK LEFT", [WR_PAD_LEFT_STICK_RIGHT] = "STICK RIGHT",
         [WR_PAD_LEFT_STICK_UP] = "STICK UP", [WR_PAD_LEFT_STICK_DOWN] = "STICK DOWN", [WR_PAD_LT] = "LT",
-        [WR_PAD_RT] = "RT",
+        [WR_PAD_RT] = "RT", [WR_PAD_RIGHT_STICK_LEFT] = "R-STICK LEFT", [WR_PAD_RIGHT_STICK_RIGHT] = "R-STICK RIGHT",
+        [WR_PAD_RIGHT_STICK_UP] = "R-STICK UP", [WR_PAD_RIGHT_STICK_DOWN] = "R-STICK DOWN",
     };
     return c >= 0 && c < WR_PAD_N && n[c] ? n[c] : "-";
 }
