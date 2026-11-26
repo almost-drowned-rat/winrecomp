@@ -42,6 +42,11 @@ typedef struct voice {
     stream st;
     uint64_t started_ns;       /* headless timing */
     uint32_t start_frame;
+    /* a queued next buffer (same format): played on in the same sample when this one ends (Bink's double
+     * buffers - switching on the game's side left 3 ms of silence at every buffer, a crackle) */
+    const uint8_t *next_data;
+    uint32_t next_bytes;
+    uint32_t switches;         /* buffers moved on to */
 } voice;
 
 static voice g_v[MAX_VOICES];
@@ -301,6 +306,19 @@ static void mix(float *out, int frames)
                     if (v->loops > 0) v->loops--;
                     v->pos = v->loop_start + (v->pos - end);
                     if (v->pos >= end) v->pos = v->loop_start;
+                } else if (v->next_data && !v->is_stream) {   /* seamless: the queued buffer */
+                    v->pos -= end;
+                    v->data = v->next_data;
+                    v->bytes = v->next_bytes;
+                    v->frames = v->next_bytes / (uint32_t)(v->channels * (v->bits / 8));
+                    v->loop_start = v->loop_end = 0;
+                    v->next_data = NULL;
+                    v->switches++;
+                    end = v->frames;
+                    if (!end || v->pos >= end) {
+                        v->state = WR_VOICE_DONE;
+                        break;
+                    }
                 } else {
                     v->state = WR_VOICE_DONE;
                     break;
@@ -348,6 +366,26 @@ static void SDLCALL feed(void *ud, SDL_AudioStream *s, int additional, int total
         lock();
         mix(buf, frames);
         unlock();
+        {   /* WR_AUDIO_DUMP=<file>: the mixed output, s16 stereo 48 kHz, the first 20 s (tests) */
+            static FILE *df;
+            static int dinit;
+            static uint64_t dn;
+            if (!dinit) {
+                dinit = 1;
+                const char *dp = getenv("WR_AUDIO_DUMP");
+                if (dp && *dp)
+                    df = fopen(dp, "wb");
+            }
+            if (df && dn < (uint64_t)OUT_RATE * 20) {
+                int16_t o[4096 * 2];
+                for (int i = 0; i < frames * 2; i++)
+                    o[i] = (int16_t)(buf[i] * 32767.0f);
+                fwrite(o, 4, (size_t)frames, df);
+                dn += (uint64_t)frames;
+                if (dn >= (uint64_t)OUT_RATE * 20)
+                    fclose(df), df = NULL;
+            }
+        }
         SDL_PutAudioStreamData(s, buf, frames * 8);
         additional -= frames * 8;
     }
@@ -457,6 +495,7 @@ void wr_voice_pcm(int v, const void *data, uint32_t bytes, int bits, int channel
     x->pos = 0;
     x->loop_start = 0;
     x->loop_end = 0;
+    x->next_data = NULL;
     x->state = WR_VOICE_STOPPED;
     unlock();
 }
@@ -493,6 +532,22 @@ uint32_t wr_voice_get_rate(int v)
 }
 void wr_voice_volume(int v, float vol) { if (valid(v)) { lock(); g_v[v].vol = vol; unlock(); } }
 void wr_voice_pan(int v, float pan) { if (valid(v)) { lock(); g_v[v].pan = pan; unlock(); } }
+
+/* The buffer to play on with when the current one ends (same format); NULL clears it. */
+void wr_voice_queue(int v, const void *data, uint32_t bytes)
+{
+    if (!valid(v))
+        return;
+    lock();
+    g_v[v].next_data = (const uint8_t *)data;
+    g_v[v].next_bytes = bytes;
+    unlock();
+}
+
+uint32_t wr_voice_switches(int v)
+{
+    return valid(v) ? g_v[v].switches : 0;
+}
 
 void wr_voice_loop(int v, int count, uint32_t start, uint32_t end)
 {

@@ -46,6 +46,7 @@ typedef struct msample {
     int cur;                    /* buffer in the voice */
     uint32_t eob_cb;
     int eob_pending;
+    uint32_t switches;          /* the voice's count when last looked at */
 } msample;
 
 static msample g_s[MAX_SAMPLES];
@@ -353,6 +354,15 @@ WR_HANDLER(ail_sample_user_data)
  * and continue with the other queued one. */
 static void buffered_step(msample *s)
 {
+    uint32_t sw = wr_voice_switches(s->voice);
+    while (s->switches != sw) {   /* the mixer moved on to the queued buffer by itself (seamless) */
+        s->switches++;
+        s->buf_state[s->cur] = 0;
+        s->eob_pending = 1;
+        s->cur ^= 1;
+        if (s->buf_state[s->cur] == 1)
+            s->buf_state[s->cur] = 2;
+    }
     if (s->buf_state[s->cur] == 2 && wr_voice_status(s->voice) != WR_VOICE_PLAYING) {
         s->buf_state[s->cur] = 0;
         s->eob_pending = 1;
@@ -422,6 +432,9 @@ WR_HANDLER(ail_load_sample_buffer)
                 wr_voice_rate(s->voice, s->rate);
                 wr_voice_loop(s->voice, 1, 0, 0);
                 wr_voice_play(s->voice);
+                s->switches = wr_voice_switches(s->voice);
+            } else {
+                wr_voice_queue(s->voice, wr_ptr(addr), len);   /* played on without a gap */
             }
         }
     }

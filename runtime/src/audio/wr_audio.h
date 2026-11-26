@@ -40,6 +40,8 @@ void wr_voice_volume(int v, float vol);   /* 0..1 */
 void wr_voice_pan(int v, float pan);      /* -1 left .. 0 centre .. +1 right */
 /* loops: 0 = forever, n = play n times; region in bytes (end 0 = to the end) */
 void wr_voice_loop(int v, int count, uint32_t start, uint32_t end);
+void wr_voice_queue(int v, const void *data, uint32_t bytes);   /* next buffer, seamless (same format) */
+uint32_t wr_voice_switches(int v);   /* how often the voice moved on to a queued buffer */
 void wr_voice_play(int v);
 void wr_voice_stop(int v);                /* pause: play resumes */
 void wr_voice_end(int v);                 /* stop and mark done */
