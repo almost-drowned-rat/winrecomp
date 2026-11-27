@@ -46,8 +46,12 @@ typedef struct {
 
 /* Extract new / changed zips and build or read the index. 1 = done (idx
  * filled, possibly empty), 0 = data/shaders could not be written. Messages go
- * to stderr with the prefix "  [SHADERS] ". */
+ * to stderr with the prefix "  [SHADERS] ", or to the port's log (below). */
 int shader_pack_sync(const char *media_shaders, const char *data_shaders, ShaderIndex *idx);
+/* The port's log for the messages (one line each, "shaders: ...", no newline;
+ * called from the pack thread, so it must be thread-safe). NULL = stderr.
+ * Call before shader_pack_start. */
+void shader_pack_set_log(void (*log_line)(const char *line));
 void shader_pack_free(ShaderIndex *idx);
 
 /* The same on a thread of its own, started once (port start-up): the state is

@@ -23,6 +23,7 @@
 #include "vk/wr_vk.h"
 #include "shader_pass.h"
 #include "wr_post.h"
+#include "wr.h"                                   /* wr_log: the port's log (gta2.log), not only stderr */
 #include <SDL3/SDL_vulkan.h>
 
 #include <stdio.h>
@@ -91,17 +92,17 @@ static int lib_load(void)
          * official Windows build imports D3DX9_43.dll (DirectX end-user
          * runtime), which Windows does not ship */
         if (wr_post_shader_library_present())
-            fprintf(stderr, "  [post] shader: %s does not load (%s) -- a library it needs is missing"
-                    " (Windows: D3DX9_43.dll); shaders off\n", path, SDL_GetError());
+            wr_log("shader: %s does not load (%s) -- a library it needs is missing"
+                   " (Windows: D3DX9_43.dll); shaders off", path, SDL_GetError());
         else
-            fprintf(stderr, "  [post] shader: no %s next to the exe -- shaders off\n", SP_LIB_NAME);
+            wr_log("shader: no %s next to the exe -- shaders off", SP_LIB_NAME);
         return 0;
     }
     abi = (PFN_libra_instance_abi_version)SDL_LoadFunction(L.so, "libra_instance_abi_version");
     api = (PFN_libra_instance_api_version)SDL_LoadFunction(L.so, "libra_instance_api_version");
     if (!abi || !api || abi() != LIBRASHADER_CURRENT_ABI || api() < 1) {
-        fprintf(stderr, "  [post] shader: %s has C ABI %d, API %d -- this build needs ABI %d; shaders off\n",
-                path, abi ? (int)abi() : -1, api ? (int)api() : -1, LIBRASHADER_CURRENT_ABI);
+        wr_log("shader: %s has C ABI %d, API %d -- this build needs ABI %d; shaders off",
+               path, abi ? (int)abi() : -1, api ? (int)api() : -1, LIBRASHADER_CURRENT_ABI);
         SDL_UnloadObject(L.so);
         memset(&L, 0, sizeof L);
         return 0;
@@ -119,14 +120,13 @@ static int lib_load(void)
           && SP_FN(get_param, "libra_vk_filter_chain_get_param")
           && SP_FN(pass_count, "libra_vk_filter_chain_get_active_pass_count")
           && SP_FN(free, "libra_vk_filter_chain_free"))) {
-        fprintf(stderr, "  [post] shader: %s lacks a function this build needs -- shaders off\n", path);
+        wr_log("shader: %s lacks a function this build needs -- shaders off", path);
         SDL_UnloadObject(L.so);
         memset(&L, 0, sizeof L);
         return 0;
     }
 #undef SP_FN
-    fprintf(stderr, "  [post] shader: %s loaded (C ABI %d, API %d)\n", path, LIBRASHADER_CURRENT_ABI,
-            (int)api());
+    wr_log("shader: %s loaded (C ABI %d, API %d)", path, LIBRASHADER_CURRENT_ABI, (int)api());
     s_lib = 1;
     return 1;
 }
@@ -138,10 +138,10 @@ static int lib_err(libra_error_t e, const char *what)
     if (!e)
         return 0;
     if (L.err_write(e, &msg) == 0 && msg) {
-        fprintf(stderr, "  [post] shader: %s failed: %s\n", what, msg);
+        wr_log("shader: %s failed: %s", what, msg);
         L.err_free_string(&msg);
     } else {
-        fprintf(stderr, "  [post] shader: %s failed\n", what);
+        wr_log("shader: %s failed", what);
     }
     L.err_free(&e);
     return 1;
@@ -301,6 +301,7 @@ static int SDLCALL build_thread(void *arg)
     po.version = L.api;
     po.original_aspect_uniforms = true;           /* the frame options pass the aspect and the rate */
     po.frametime_uniforms = true;
+    wr_log("shader: loading preset %s", b->path);   /* before: a hard exit inside librashader leaves this line */
     if (lib_err(L.preset_create(b->path, NULL, &po, &preset), "loading the preset"))
         goto done;
     memset(&pl, 0, sizeof pl);
@@ -392,7 +393,7 @@ static void build_finish(void)
         if (vkCreateFence(b->d.dev, &fci, NULL, &f) != VK_SUCCESS
             || vkQueueSubmit(b->d.queue, 1, &si, f) != VK_SUCCESS
             || vkWaitForFences(b->d.dev, 1, &f, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-            fprintf(stderr, "  [post] shader: the chain's set-up did not run -- shaders off\n");
+            wr_log("shader: the chain's set-up did not run -- shaders off");
             vkDeviceWaitIdle(b->d.dev);
             L.free(&b->chain);
             b->chain = NULL;
@@ -427,16 +428,16 @@ static void build_finish(void)
         b->params = NULL;
         SDL_SetAtomicInt(&s_ov_dirty, 1);         /* overrides set while it was built */
         lib_err(L.pass_count(&s_chain, &passes), "the pass count");
-        fprintf(stderr, "  [post] shader: %s -- %u passes, %d parameters, built in %.0f ms"
-                " (+ %.1f ms set-up on the render thread)\n", b->path, passes, b->nparams, b->ms,
-                (SDL_GetTicksNS() - t0) / 1e6);
+        wr_log("shader: %s -- %u passes, %d parameters, built in %.0f ms"
+               " (+ %.1f ms set-up on the render thread)", b->path, passes, b->nparams, b->ms,
+               (SDL_GetTicksNS() - t0) / 1e6);
         SDL_SetAtomicInt(&s_status, WR_POST_SHADER_ON);
     } else {
         free(b->params);
         b->params = NULL;
         params_publish(NULL, 0);
         if (!b->no_lib)
-            fprintf(stderr, "  [post] shader: %s not used -- the picture stays unshaded\n", b->path);
+            wr_log("shader: %s not used -- the picture stays unshaded", b->path);
         SDL_SetAtomicInt(&s_status, b->no_lib ? WR_POST_SHADER_NO_LIBRARY : WR_POST_SHADER_FAILED);
     }
 }
@@ -486,7 +487,7 @@ int sp_tick(const SpDevice *d)
             SDL_SetAtomicInt(&s_status, WR_POST_SHADER_LOADING);
             s_thread = SDL_CreateThread(build_thread, "shader", &s_b);
             if (!s_thread) {
-                fprintf(stderr, "  [post] shader: no worker thread -- shaders off\n");
+                wr_log("shader: no worker thread -- shaders off");
                 SDL_SetAtomicInt(&s_status, WR_POST_SHADER_FAILED);
             }
         }

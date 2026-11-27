@@ -12,11 +12,41 @@ void shader_pack_show_bezels(int on) { s_show_bezels = on != 0; }
 #include <string.h>
 #include <SDL3/SDL.h>
 
-#define SP_LOG "  [SHADERS] "
+#include <stdarg.h>
+
 #define SP_MAX_PACK_BYTES (1ull << 30)            /* one pack unpacked: the stock pack is 71 MB */
 #define SP_MAX_REF_DEPTH 16
 
+/* ── messages: the port's log, else stderr ────────────────────────── */
+
+static void (*s_log_line)(const char *line);
+void shader_pack_set_log(void (*log_line)(const char *line)) { s_log_line = log_line; }
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 1, 2)))
+#endif
+static void sp_log(const char *fmt, ...)
+{
+    char buf[1600];
+    int n;
+    va_list ap;
+    memcpy(buf, "shaders: ", 9);
+    va_start(ap, fmt);
+    n = vsnprintf(buf + 9, sizeof buf - 9, fmt, ap);
+    va_end(ap);
+    if (n < 0)
+        return;
+    if (s_log_line)
+        s_log_line(buf);
+    else
+        fprintf(stderr, "  [SHADERS] %s\n", buf + 9);
+}
+
 /* ── small helpers ────────────────────────────────────────────────── */
+/* Memory: plain malloc / free for everything made here (cat3, join, Names.v, the
+ * signature), SDL_free only for what SDL allocates (SDL_strdup, SDL_LoadFile).
+ * Windows: the port's C runtime (UCRT) and SDL3.dll's (msvcrt) are two heaps -
+ * freeing across them corrupts the heap (GTA 2 issue #4). */
 
 static char *cat3(const char *a, const char *b, const char *c)
 {
@@ -236,7 +266,7 @@ static int extract(const char *zip, const char *dst, const char *pack)
     char *lp;
 
     if (!z) {
-        fprintf(stderr, SP_LOG "%s: %s -- pack skipped\n", zip, err);
+        sp_log("%s: %s -- pack skipped", zip, err);
         return 0;
     }
     if (!mkdirs(dst) || !(lp = join(dst, ".pack_files"))) {
@@ -258,7 +288,7 @@ static int extract(const char *zip, const char *dst, const char *pack)
         void *buf;
         if (!zip_safe_path(e->name, safe, sizeof safe)) {
             if (refused++ < 5)
-                fprintf(stderr, SP_LOG "%s: entry \"%s\" refused (leaves the folder or is not a plain path)\n",
+                sp_log("%s: entry \"%s\" refused (leaves the folder or is not a plain path)",
                         pack, e->name);
             continue;
         }
@@ -282,7 +312,7 @@ static int extract(const char *zip, const char *dst, const char *pack)
         }
         total += e->usize;
         if (total > SP_MAX_PACK_BYTES) {
-            fprintf(stderr, SP_LOG "%s: more than %llu MB unpacked -- pack skipped\n", pack, SP_MAX_PACK_BYTES >> 20);
+            sp_log("%s: more than %llu MB unpacked -- pack skipped", pack, SP_MAX_PACK_BYTES >> 20);
             free(out);
             ok = 0;
             break;
@@ -297,10 +327,10 @@ static int extract(const char *zip, const char *dst, const char *pack)
         SDL_WriteIO(list, "\n", 1);
         buf = malloc(e->usize ? e->usize : 1);
         if (!ok || !buf || !zip_extract(z, i, buf, err, sizeof err)) {
-            fprintf(stderr, SP_LOG "%s: %s: %s -- pack skipped\n", pack, e->name, buf ? err : "out of memory");
+            sp_log("%s: %s: %s -- pack skipped", pack, e->name, buf ? err : "out of memory");
             ok = 0;
         } else if (!write_file(out, buf, e->usize)) {
-            fprintf(stderr, SP_LOG "%s: cannot write %s -- pack skipped\n", pack, out);
+            sp_log("%s: cannot write %s -- pack skipped", pack, out);
             ok = 0;
         } else {
             files++;
@@ -311,9 +341,9 @@ static int extract(const char *zip, const char *dst, const char *pack)
     SDL_CloseIO(list);
     zip_close(z);
     if (refused)
-        fprintf(stderr, SP_LOG "%s: %d entries refused by the path guard\n", pack, refused);
+        sp_log("%s: %d entries refused by the path guard", pack, refused);
     if (ok)
-        fprintf(stderr, SP_LOG "%s: %d files extracted (%.1f MB)%s%s%s\n", pack, files, total / 1048576.0,
+        sp_log("%s: %d files extracted (%.1f MB)%s%s%s", pack, files, total / 1048576.0,
                 rl ? ", root folder " : "", rl ? root : "", rl ? " stripped" : "");
     return ok;
 }
@@ -348,7 +378,7 @@ static int sync_zip(const char *zip, const char *data, const char *pack)
     if (exists(dst))
         remove_listed(dst);                       /* the old contents of a changed zip */
     if (exists(dst) || !SDL_RenamePath(part, dst)) {
-        fprintf(stderr, SP_LOG "%s: cannot replace %s (%s) -- the new files stay in %s\n", pack, dst,
+        sp_log("%s: cannot replace %s (%s) -- the new files stay in %s", pack, dst,
                 SDL_GetError(), part);
         goto out;
     }
@@ -645,7 +675,7 @@ int shader_pack_sync(const char *media, const char *data, ShaderIndex *x)
 {
     uint64_t t0 = SDL_GetTicksNS();
     Names l;
-    char *sig = SDL_strdup(""), *ifile;
+    char *sig = cat3("", "", ""), *ifile;     /* malloc'd like every cat3 that replaces it */
     int i;
     Walk w;
 
@@ -653,13 +683,13 @@ int shader_pack_sync(const char *media, const char *data, ShaderIndex *x)
     if (!sig)
         return 0;
     if (!is_dir(media)) {
-        fprintf(stderr, SP_LOG "no %s -- no shader packs\n", media);
-        SDL_free(sig);
+        sp_log("no %s -- no shader packs", media);
+        free(sig);
         return 1;
     }
     if (!mkdirs(data)) {
-        fprintf(stderr, SP_LOG "cannot create %s -- no shader packs\n", data);
-        SDL_free(sig);
+        sp_log("cannot create %s -- no shader packs", data);
+        free(sig);
         return 0;
     }
     l = list_dir(media);
@@ -689,7 +719,7 @@ int shader_pack_sync(const char *media, const char *data, ShaderIndex *x)
         }
         if (line) {
             ns = cat3(sig, line, st);
-            SDL_free(sig);
+            free(sig);
             free(line);
             sig = ns ? cat3(ns, "\n", "") : NULL;
             free(ns);
@@ -703,7 +733,7 @@ int shader_pack_sync(const char *media, const char *data, ShaderIndex *x)
     }
     ifile = join(data, s_show_bezels ? "index_all.txt" : "index.txt");   /* one cache per listing */
     if (ifile && index_read(ifile, sig, media, data, x)) {
-        fprintf(stderr, SP_LOG "%d packs, %d presets (index unchanged) in %.0f ms\n", x->packs, x->n,
+        sp_log("%d packs, %d presets (index unchanged) in %.0f ms", x->packs, x->n,
                 (SDL_GetTicksNS() - t0) / 1e6);
     } else {
         w.idx = x;
@@ -739,12 +769,15 @@ int shader_pack_sync(const char *media, const char *data, ShaderIndex *x)
             qsort(x->p, (size_t)x->n, sizeof *x->p, preset_cmp);
         if (ifile)
             index_write(ifile, sig, x, data);
-        fprintf(stderr, SP_LOG "%d packs (%d extracted now, %d failed), %d presets, %d bezel/border folders"
-                " hidden, index built in %.0f ms\n", x->packs, x->extracted, x->failed, x->n, w.hidden,
+        sp_log("%d packs (%d extracted now, %d failed), %d presets, %d bezel/border folders"
+               " hidden, index built in %.0f ms", x->packs, x->extracted, x->failed, x->n, w.hidden,
                 (SDL_GetTicksNS() - t0) / 1e6);
     }
+    if (x->packs && !x->n)
+        sp_log("%d packs but no .slangp preset in them - one pack = one sub-folder or .zip of %s, its presets"
+               " inside it (loose presets in %s itself are not read)", x->packs, media, media);
     free(ifile);
-    SDL_free(sig);
+    free(sig);
     names_free(&l);
     return 1;
 }
