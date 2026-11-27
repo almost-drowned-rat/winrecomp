@@ -188,13 +188,19 @@ int wr_path_ci(const char *dir, const char *rel, char *host, size_t cap)
  * for or add to the game's, e.g. translations unpacked into data/, and the
  * player's mods). Searched in the order added. */
 #define MAX_READ_DIRS 36
+#define PORT_READ_DIRS 4   /* kept free of mods for the port's own folders (e.g. the translations) */
 static char g_read_dirs[MAX_READ_DIRS][1024];
 static int g_nread_dirs;
 
 void wr_path_add_read_dir(const char *dir)
 {
-    if (g_nread_dirs < MAX_READ_DIRS && dir && *dir)
-        snprintf(g_read_dirs[g_nread_dirs++], sizeof g_read_dirs[0], "%s", dir);
+    if (!dir || !*dir)
+        return;
+    if (g_nread_dirs >= MAX_READ_DIRS) {
+        wr_log("paths: read folder %s left out (at most %d)", dir, MAX_READ_DIRS);
+        return;
+    }
+    snprintf(g_read_dirs[g_nread_dirs++], sizeof g_read_dirs[0], "%s", dir);
 }
 
 static int cmp_ci(const void *a, const void *b) { return strcasecmp((const char *)a, (const char *)b); }
@@ -219,10 +225,10 @@ int wr_path_add_mod_dirs(const char *dir)
     DIR *d = opendir(dir);
     if (!d)
         return 0;
-    static char names[MAX_READ_DIRS][256];
-    int n = 0;
+    static char names[256][256];
+    int n = 0, all = 0;   /* names kept / mod folders seen */
     struct dirent *e;
-    while ((e = readdir(d)) != NULL && n < MAX_READ_DIRS) {
+    while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.' || e->d_name[0] == '_' || !strcasecmp(e->d_name, "textures"))
             continue;   /* switched off, or the texture packs' folder */
         char p[1400];
@@ -230,20 +236,24 @@ int wr_path_add_mod_dirs(const char *dir)
         snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
         if (stat(p, &st) != 0 || !S_ISDIR(st.st_mode))
             continue;
-        snprintf(names[n++], sizeof names[0], "%s", e->d_name);
+        all++;
+        if (n < (int)(sizeof names / sizeof names[0]))
+            snprintf(names[n++], sizeof names[0], "%s", e->d_name);
     }
     closedir(d);
     qsort(names, (size_t)n, sizeof names[0], cmp_ci);
     int added = 0;
-    for (int i = 0; i < n && g_nread_dirs < MAX_READ_DIRS; i++) {
+    /* mods never take the last PORT_READ_DIRS slots: the port adds its own folders after them */
+    for (int i = 0; i < n && g_nread_dirs < MAX_READ_DIRS - PORT_READ_DIRS; i++) {
         char p[1400];
         snprintf(p, sizeof p, "%s/%s", dir, names[i]);
         wr_path_add_read_dir(p);
         wr_log("mods: %s", names[i]);
         added++;
     }
-    if (n > added)
-        wr_log("mods: %d more left out (at most %d folders are read)", n - added, MAX_READ_DIRS);
+    if (all > added)
+        wr_log("mods: %d more left out (at most %d mod folders are read)", all - added,
+               MAX_READ_DIRS - PORT_READ_DIRS);
     return added;
 }
 
