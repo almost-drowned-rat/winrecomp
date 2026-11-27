@@ -276,8 +276,12 @@ int  wr_path_relative(const char *guest, char *rel, size_t cap);
 extern char g_wr_cwd[512];
 /* Case-insensitive host lookup of rel below dir; 1 if found. */
 int  wr_path_ci(const char *dir, const char *rel, char *host, size_t cap);
-/* A folder read after saves/ and before game/ (up to 4). */
+/* A folder read after saves/ and before game/ (up to 36, in the order added). */
 void wr_path_add_read_dir(const char *dir);
+/* Every folder below dir is one mod (a tree like game/), read after saves/ and before game/, in name order;
+ * "_" or "." first in a name switches it off, "textures" is the texture packs' folder (not a mod).
+ * Creates dir and dir/textures. Returns the number of mods added. */
+int  wr_path_add_mod_dirs(const char *dir);
 /* the port may read another file in place of one: rel path in ('/'), a replacement or NULL */
 extern const char *(*g_wr_read_map)(const char *rel);
 

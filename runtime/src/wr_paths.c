@@ -185,14 +185,66 @@ int wr_path_ci(const char *dir, const char *rel, char *host, size_t cap)
 }
 
 /* Folders read between saves/ and game/ (the port's own files that stand in
- * for or add to the game's, e.g. translations unpacked into data/). */
-static char g_read_dirs[4][1024];
+ * for or add to the game's, e.g. translations unpacked into data/, and the
+ * player's mods). Searched in the order added. */
+#define MAX_READ_DIRS 36
+static char g_read_dirs[MAX_READ_DIRS][1024];
 static int g_nread_dirs;
 
 void wr_path_add_read_dir(const char *dir)
 {
-    if (g_nread_dirs < 4 && dir && *dir)
+    if (g_nread_dirs < MAX_READ_DIRS && dir && *dir)
         snprintf(g_read_dirs[g_nread_dirs++], sizeof g_read_dirs[0], "%s", dir);
+}
+
+static int cmp_ci(const void *a, const void *b) { return strcasecmp((const char *)a, (const char *)b); }
+
+/* Mods: every folder below dir is one mod, a tree like the game's own folder
+ * (e.g. mods/MyMod/data/wil.sty stands in for game/data/wil.sty). Added in
+ * name order, so the first by name wins where two mods hold the same file
+ * ("01 ...", "02 ..." set the order). A folder whose name starts with "_" or
+ * "." is skipped (switched off), "textures" is the texture packs' folder.
+ * Returns the number of mods added. */
+#include <dirent.h>
+int wr_path_add_mod_dirs(const char *dir)
+{
+    if (!dir || !*dir)
+        return 0;
+    mkdirs(dir);   /* there from the first start, so the player sees where mods go */
+    {   /* ... and the texture packs' folder in it (maintainer 2026-11-27) */
+        char t[1200];
+        snprintf(t, sizeof t, "%s/textures", dir);
+        mkdirs(t);
+    }
+    DIR *d = opendir(dir);
+    if (!d)
+        return 0;
+    static char names[MAX_READ_DIRS][256];
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL && n < MAX_READ_DIRS) {
+        if (e->d_name[0] == '.' || e->d_name[0] == '_' || !strcasecmp(e->d_name, "textures"))
+            continue;   /* switched off, or the texture packs' folder */
+        char p[1400];
+        struct stat st;
+        snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        if (stat(p, &st) != 0 || !S_ISDIR(st.st_mode))
+            continue;
+        snprintf(names[n++], sizeof names[0], "%s", e->d_name);
+    }
+    closedir(d);
+    qsort(names, (size_t)n, sizeof names[0], cmp_ci);
+    int added = 0;
+    for (int i = 0; i < n && g_nread_dirs < MAX_READ_DIRS; i++) {
+        char p[1400];
+        snprintf(p, sizeof p, "%s/%s", dir, names[i]);
+        wr_path_add_read_dir(p);
+        wr_log("mods: %s", names[i]);
+        added++;
+    }
+    if (n > added)
+        wr_log("mods: %d more left out (at most %d folders are read)", n - added, MAX_READ_DIRS);
+    return added;
 }
 
 /* the port may read another file in place of one (tests, e.g. GTA 2's radio station check) */
